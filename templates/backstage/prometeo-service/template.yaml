@@ -1,0 +1,221 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: prometeo-service
+  title: "Prometeo: service"
+  description: >-
+    One runnable service (a Deployment, its AWS identity, its network rules) — a Prometeo
+    AppService. Replaces tf-common-modules/modules/bootstrap-service. The product must already
+    exist (run prometeo-product first) with this file's name listed in its componentFiles.
+  tags:
+    - prometeo
+spec:
+  owner: guests
+  type: service
+  parameters:
+    - title: Placement
+      required:
+        - name
+        - product
+        - image
+      properties:
+        name:
+          title: Service name
+          type: string
+          description: >-
+            e.g. "add-fe". Becomes the XR name and its own namespace (one namespace per service,
+            not per product) — must match a filename you listed in the product's componentFiles.
+          pattern: '^[a-z][a-z0-9-]*$'
+          ui:autofocus: true
+        product:
+          title: Product
+          type: string
+          description: The product this service belongs to (must already exist in prometeo-products).
+        image:
+          title: Container image
+          type: string
+          description: Full image ref including tag or digest.
+        containerPort:
+          title: Container port
+          type: integer
+          default: 8080
+          description: Backends typically use 8000/8001, frontends 3000.
+        replicas:
+          title: Replicas
+          type: integer
+    - title: Runtime
+      properties:
+        env:
+          title: Environment variables
+          type: object
+          additionalProperties:
+            type: string
+          default: {}
+        connections:
+          title: Datastore connections
+          type: array
+          description: >-
+            Names of datastore components in this same namespace to mount (their
+            <name>-connection ConfigMap), e.g. ["db"].
+          items:
+            type: string
+          default: []
+        migrationsEnabled:
+          title: Run schema migrations before rollout
+          type: boolean
+          default: false
+    - title: AWS access
+      description: Opens the matching VPC interface endpoint's NetworkPolicy.
+      properties:
+        awsBedrock:
+          title: Bedrock
+          type: boolean
+          default: false
+        awsS3:
+          title: S3
+          type: boolean
+          default: false
+        awsSqs:
+          title: SQS
+          type: boolean
+          default: false
+        awsDynamodb:
+          title: DynamoDB
+          type: boolean
+          default: false
+    - title: Ingress
+      properties:
+        ingressEnabled:
+          title: Expose through the shared ALB
+          type: boolean
+          default: false
+        ingressHost:
+          title: Host
+          type: string
+          description: Defaults to <product>.<environment domain> when left blank.
+        ingressDnsRecord:
+          title: Point DNS at the ALB
+          type: boolean
+          default: true
+          description: Set false when an SsoEndpoint fronts this service instead.
+        healthcheckPath:
+          title: Health check path
+          type: string
+          default: /health
+    - title: Network
+      description: Everything is denied by default; each entry opens one direction, to one peer, on one port.
+      properties:
+        allowFrom:
+          title: Allow from
+          type: array
+          items:
+            type: object
+            required: [service, port]
+            properties:
+              service:
+                type: string
+              port:
+                type: integer
+          default: []
+        allowTo:
+          title: Allow to
+          type: array
+          items:
+            type: object
+            required: [service, port]
+            properties:
+              service:
+                type: string
+              port:
+                type: integer
+          default: []
+
+  steps:
+    - id: write-component
+      name: Write the AppService manifest
+      action: roadiehq:utils:fs:write
+      input:
+        path: products/${{ values.product }}/base/${{ values.name }}.yaml
+        content: |
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: ${{ values.name }}
+            labels:
+              name: ${{ values.name }}
+              service: ${{ values.name }}
+              product: ${{ values.product }}
+              platform: prometeo
+              admission.datadoghq.com/enabled: "true"
+          ---
+          apiVersion: platform.prometeo.iag.ai/v1alpha1
+          kind: AppService
+          metadata:
+            name: ${{ values.name }}
+            namespace: ${{ values.name }}
+          spec:
+            product: ${{ values.product }}
+            image: ${{ values.image | dump }}
+            containerPort: ${{ values.containerPort }}
+          {% if values.replicas %}
+            replicas: {{ values.replicas }}
+          {% endif %}
+          {% if values.env and values.env | length %}
+            env:
+          {% for k, v in values.env %}
+              {{ k }}: {{ v | dump }}
+          {% endfor %}
+          {% endif %}
+          {% if values.connections and values.connections | length %}
+            connections:
+          {% for c in values.connections %}
+              - {{ c }}
+          {% endfor %}
+          {% endif %}
+            migrations:
+              enabled: ${{ values.migrationsEnabled }}
+            aws:
+              bedrock: ${{ values.awsBedrock }}
+              s3: ${{ values.awsS3 }}
+              sqs: ${{ values.awsSqs }}
+              dynamodb: ${{ values.awsDynamodb }}
+            ingress:
+              enabled: ${{ values.ingressEnabled }}
+          {% if values.ingressHost %}
+              host: {{ values.ingressHost | dump }}
+          {% endif %}
+              dnsRecord: ${{ values.ingressDnsRecord }}
+              healthcheckPath: ${{ values.healthcheckPath | dump }}
+          {% if (values.allowFrom and values.allowFrom | length) or (values.allowTo and values.allowTo | length) %}
+            network:
+          {% if values.allowFrom and values.allowFrom | length %}
+              allowFrom:
+          {% for r in values.allowFrom %}
+                - service: {{ r.service }}
+                  port: {{ r.port }}
+          {% endfor %}
+          {% endif %}
+          {% if values.allowTo and values.allowTo | length %}
+              allowTo:
+          {% for r in values.allowTo %}
+                - service: {{ r.service }}
+                  port: {{ r.port }}
+          {% endfor %}
+          {% endif %}
+          {% endif %}
+
+    - id: publish
+      name: Open a PR with the new service
+      action: publish:github:pull-request
+      input:
+        repoUrl: github.com?repo=prometeo-products&owner=crossplane-poc
+        branchName: scaffolder/service-${{ values.name }}
+        title: 'prometeo service: ${{ values.name }}'
+        description: >-
+          Adds `products/${{ values.product }}/base/${{ values.name }}.yaml` (Namespace +
+          AppService) via the prometeo-service Backstage template.
+
+  output:
+    links:
+      - title: Open PR
+        url: ${{ steps['publish'].output.remoteUrl }}

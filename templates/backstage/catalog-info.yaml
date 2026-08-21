@@ -1,14 +1,26 @@
 apiVersion: backstage.io/v1alpha1
 kind: Location
 metadata:
-  name: basic-example-templates
-  description: A collection of example templates
+  name: prometeo-templates
+  description: >-
+    Backstage templates for Prometeo's native Crossplane components (service, database,
+    statefulbackend, s3), PR-ing generated manifests into crossplane-poc/prometeo-products.
 spec:
   targets:
-    - ./basic/template.yaml
-    - ./argo-workflows/template.yaml
-    - ./app-with-bucket/template.yaml
-    - ./ray-serve/template-ray-serve.yaml
+    - ./prometeo-product/template.yaml
+    - ./prometeo-service/template.yaml
+    - ./prometeo-database/template.yaml
+    - ./prometeo-statefulbackend/template.yaml
+    - ./prometeo-s3/template.yaml
+---
+apiVersion: backstage.io/v1alpha1
+kind: Location
+metadata:
+  name: prometeo-products-catalog
+  description: Discovers a System entity per product scaffolded into crossplane-poc/prometeo-products
+spec:
+  type: url
+  target: https://github.com/crossplane-poc/prometeo-products/blob/main/catalog-info.yaml
 ---
 apiVersion: backstage.io/v1alpha1
 kind: Location

@@ -1,0 +1,228 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: prometeo-statefulbackend
+  title: "Prometeo: statefulbackend"
+  description: >-
+    A backend and the database it owns, as one bundle — a Prometeo StatefulBackend. Use this when
+    a backend owns its database exclusively; when several services share one database, use
+    prometeo-service plus a separate prometeo-database instead. The product must already exist
+    (run prometeo-product first) with this file's name listed in its componentFiles.
+  tags:
+    - prometeo
+spec:
+  owner: guests
+  type: service
+  parameters:
+    - title: Placement
+      required:
+        - name
+        - product
+        - image
+      properties:
+        name:
+          title: Service name
+          type: string
+          description: >-
+            e.g. "add-be". Becomes the XR name and its own namespace, shared with the database it
+            owns — must match a filename you listed in the product's componentFiles.
+          pattern: '^[a-z][a-z0-9-]*$'
+          ui:autofocus: true
+        product:
+          title: Product
+          type: string
+          description: The product this backend belongs to (must already exist in prometeo-products).
+        image:
+          title: Container image
+          type: string
+        containerPort:
+          title: Container port
+          type: integer
+          default: 8000
+        replicas:
+          title: Replicas
+          type: integer
+    - title: Runtime
+      properties:
+        env:
+          title: Environment variables
+          type: object
+          additionalProperties:
+            type: string
+          default: {}
+        migrationsEnabled:
+          title: Run schema migrations before rollout
+          type: boolean
+          default: false
+    - title: AWS access
+      properties:
+        awsBedrock:
+          title: Bedrock
+          type: boolean
+          default: false
+        awsS3:
+          title: S3
+          type: boolean
+          default: false
+        awsSqs:
+          title: SQS
+          type: boolean
+          default: false
+        awsDynamodb:
+          title: DynamoDB
+          type: boolean
+          default: false
+    - title: Network
+      properties:
+        allowFrom:
+          title: Allow from
+          type: array
+          items:
+            type: object
+            required: [service, port]
+            properties:
+              service:
+                type: string
+              port:
+                type: integer
+          default: []
+        allowTo:
+          title: Allow to
+          type: array
+          items:
+            type: object
+            required: [service, port]
+            properties:
+              service:
+                type: string
+              port:
+                type: integer
+          default: []
+    - title: Its database
+      properties:
+        databaseName:
+          title: Database name inside the cluster
+          type: string
+          description: Defaults to "<product>db" (hyphens removed) when left blank.
+        engineVersion:
+          title: Aurora PostgreSQL version
+          type: string
+        minACU:
+          title: Min ACU
+          type: number
+        maxACU:
+          title: Max ACU
+          type: number
+        instances:
+          title: Instances
+          type: integer
+          default: 1
+        schemas:
+          title: Schemas to create at bootstrap
+          type: array
+          items:
+            type: string
+          default: []
+        deletionProtection:
+          title: Deletion protection
+          type: boolean
+          default: false
+
+  steps:
+    - id: write-component
+      name: Write the StatefulBackend manifest
+      action: roadiehq:utils:fs:write
+      input:
+        path: products/${{ values.product }}/base/${{ values.name }}.yaml
+        content: |
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: ${{ values.name }}
+            labels:
+              name: ${{ values.name }}
+              service: ${{ values.name }}
+              product: ${{ values.product }}
+              platform: prometeo
+              admission.datadoghq.com/enabled: "true"
+          ---
+          apiVersion: platform.prometeo.iag.ai/v1alpha1
+          kind: StatefulBackend
+          metadata:
+            name: ${{ values.name }}
+            namespace: ${{ values.name }}
+          spec:
+            product: ${{ values.product }}
+            image: ${{ values.image | dump }}
+            containerPort: ${{ values.containerPort }}
+          {% if values.replicas %}
+            replicas: {{ values.replicas }}
+          {% endif %}
+          {% if values.env and values.env | length %}
+            env:
+          {% for k, v in values.env %}
+              {{ k }}: {{ v | dump }}
+          {% endfor %}
+          {% endif %}
+            migrations:
+              enabled: ${{ values.migrationsEnabled }}
+            aws:
+              bedrock: ${{ values.awsBedrock }}
+              s3: ${{ values.awsS3 }}
+              sqs: ${{ values.awsSqs }}
+              dynamodb: ${{ values.awsDynamodb }}
+          {% if (values.allowFrom and values.allowFrom | length) or (values.allowTo and values.allowTo | length) %}
+            network:
+          {% if values.allowFrom and values.allowFrom | length %}
+              allowFrom:
+          {% for r in values.allowFrom %}
+                - service: {{ r.service }}
+                  port: {{ r.port }}
+          {% endfor %}
+          {% endif %}
+          {% if values.allowTo and values.allowTo | length %}
+              allowTo:
+          {% for r in values.allowTo %}
+                - service: {{ r.service }}
+                  port: {{ r.port }}
+          {% endfor %}
+          {% endif %}
+          {% endif %}
+            database:
+          {% if values.databaseName %}
+              databaseName: {{ values.databaseName | dump }}
+          {% endif %}
+          {% if values.engineVersion %}
+              engineVersion: {{ values.engineVersion | dump }}
+          {% endif %}
+          {% if values.schemas and values.schemas | length %}
+              schemas:
+          {% for s in values.schemas %}
+                - {{ s }}
+          {% endfor %}
+          {% endif %}
+              capacity:
+                instances: ${{ values.instances }}
+          {% if values.minACU %}
+                minACU: {{ values.minACU }}
+          {% endif %}
+          {% if values.maxACU %}
+                maxACU: {{ values.maxACU }}
+          {% endif %}
+              deletionProtection: ${{ values.deletionProtection }}
+
+    - id: publish
+      name: Open a PR with the new statefulbackend
+      action: publish:github:pull-request
+      input:
+        repoUrl: github.com?repo=prometeo-products&owner=crossplane-poc
+        branchName: scaffolder/statefulbackend-${{ values.name }}
+        title: 'prometeo statefulbackend: ${{ values.name }}'
+        description: >-
+          Adds `products/${{ values.product }}/base/${{ values.name }}.yaml` (Namespace +
+          StatefulBackend) via the prometeo-statefulbackend Backstage template.
+
+  output:
+    links:
+      - title: Open PR
+        url: ${{ steps['publish'].output.remoteUrl }}

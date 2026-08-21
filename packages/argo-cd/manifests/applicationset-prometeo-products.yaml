@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: prometeo-products
+  namespace: argocd
+spec:
+  generators:
+    - git:
+        repoURL: https://github.com/crossplane-poc/prometeo-products.git
+        revision: main
+        directories:
+          - path: products/*/envs/sb3
+  template:
+    metadata:
+      name: 'prometeo-{{path[1]}}-sb3'
+    spec:
+      project: prometeo-products
+      source:
+        repoURL: https://github.com/crossplane-poc/prometeo-products.git
+        targetRevision: main
+        path: '{{path}}'
+      destination:
+        server: https://kubernetes.default.svc
+      syncPolicy:
+        # No `automated:` block, on purpose — merging a product's PR must not deploy it. Sync is
+        # a manual, deliberate action (ArgoCD UI/CLI or Backstage's ArgoCD plugin), not a side
+        # effect of a merge.
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+        retry:
+          limit: -1
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 10m
