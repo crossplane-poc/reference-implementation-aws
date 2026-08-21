@@ -1,0 +1,72 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: delete
+  title: "Delete a component"
+  description: >-
+    Permanently removes one component or resource from a product: deletes both its Backstage
+    entity and its Crossplane manifest via a PR against prometeo-products. Nothing is torn down
+    until that PR is reviewed and merged.
+  tags:
+    - prometeo
+spec:
+  owner: guests
+  type: resource
+  parameters:
+    - title: What to delete
+      required:
+        - product
+        - component
+        - reason
+      properties:
+        product:
+          title: Product
+          type: string
+          description: The product the component belongs to.
+          ui:field: EntityPicker
+          ui:options:
+            catalogFilter:
+              kind: System
+            defaultKind: System
+        component:
+          title: Component
+          type: string
+          description: >-
+            The component or resource to permanently delete. This cannot be undone once the PR
+            is merged.
+          ui:field: EntityPicker
+          ui:options:
+            catalogFilter:
+              kind: [Component, Resource]
+              spec.system: ${{ parameters.product }}
+            defaultKind: Component
+        reason:
+          title: Reason for deletion
+          type: string
+          description: Recorded in the PR for audit history.
+
+  steps:
+    - id: publish
+      name: Open a PR deleting the component
+      action: publish:github:pull-request
+      input:
+        repoUrl: github.com?repo=prometeo-products&owner=crossplane-poc
+        branchName: scaffolder/delete-${{ parameters.product }}-${{ parameters.component | parseEntityRef | pick('name') }}
+        title: "prometeo delete: ${{ parameters.product }}/${{ parameters.component | parseEntityRef | pick('name') }}"
+        description: >-
+          Removes `products/${{ parameters.product }}/base/${{ parameters.component | parseEntityRef | pick('name') }}.yaml`
+          and its Backstage entity, via the "delete" template.
+
+
+          Reason: ${{ parameters.reason }}
+
+
+          **Merging this PR deletes the live infrastructure. This cannot be undone.**
+        filesToDelete:
+          - products/${{ parameters.product }}/base/${{ parameters.component | parseEntityRef | pick('name') }}.yaml
+          - products/${{ parameters.product }}/components/${{ parameters.component | parseEntityRef | pick('name') }}.yaml
+
+  output:
+    links:
+      - title: Open PR
+        url: ${{ steps['publish'].output.remoteUrl }}
