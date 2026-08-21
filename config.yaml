@@ -16,7 +16,7 @@ auto_mode: "true"
 region: "eu-west-1"
 
 # Base Domain name used for exposing services. It should be a subdomain or main domain of the Route53 hosted zone.
-domain: "sb3.agents.iag.ai"
+domain: "sb3.ims.iag.ai"
 
 # Route53 hosted zone ID for configuring external-dns
 route53_hosted_zone_id: "Z0625912191R1GY8Y9405"
