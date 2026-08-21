@@ -3,7 +3,21 @@ cnoe_ref_impl:
   auto_mode: '"true"'
 dex:
   enabled: false
+controller:
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+repoServer:
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
 server:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
   ingress:
     enabled: true
     ingressClassName: "nginx"
