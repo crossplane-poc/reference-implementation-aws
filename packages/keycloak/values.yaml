@@ -5,6 +5,8 @@ proxyHeaders: "forwarded"
 
 global:
   defaultStorageClass: gp3
+  security:
+    allowInsecureImages: true
 
 image:
   registry: docker.io
