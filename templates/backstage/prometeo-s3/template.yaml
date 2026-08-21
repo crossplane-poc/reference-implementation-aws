@@ -1,0 +1,120 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: prometeo-s3
+  title: "Prometeo: s3"
+  description: >-
+    One S3 bucket, encrypted with its own key, private, versioned — a Prometeo ObjectStore.
+    Replaces tf-common-modules/modules/s3 plus its per-product IAM access policy. The product
+    must already exist (run prometeo-product first) with this file's name listed in its
+    componentFiles.
+  tags:
+    - prometeo
+spec:
+  owner: guests
+  type: resource
+  parameters:
+    - title: Placement
+      required:
+        - name
+        - product
+        - namespace
+      properties:
+        name:
+          title: Bucket component name
+          type: string
+          description: e.g. "exports". Becomes the XR name.
+          pattern: '^[a-z][a-z0-9-]*$'
+          ui:autofocus: true
+        product:
+          title: Product
+          type: string
+          description: The product this bucket belongs to (must already exist in prometeo-products).
+        namespace:
+          title: Namespace
+          type: string
+          description: >-
+            Granted to one service only? Use that service's own namespace. Shared by more than
+            one? Use "<product>-<name>" instead.
+        bucketName:
+          title: Bucket name
+          type: string
+          description: >-
+            Full bucket name. Defaults to prometeo-<env>-<product>-<component> when left blank —
+            S3 names are globally unique, so set this if the default is already taken.
+    - title: Lifecycle and access
+      properties:
+        expirationDays:
+          title: Expire objects after (days)
+          type: integer
+          description: Leave blank to keep objects forever.
+        access:
+          title: Service access
+          type: array
+          items:
+            type: object
+            required: [service]
+            properties:
+              service:
+                type: string
+              level:
+                type: string
+                enum: [ro, rw]
+                default: rw
+          default: []
+
+  steps:
+    - id: write-component
+      name: Write the ObjectStore manifest
+      action: roadiehq:utils:fs:write
+      input:
+        path: products/${{ values.product }}/base/${{ values.name }}.yaml
+        content: |
+          # The Namespace object is repeated harmlessly if this bucket shares a namespace with
+          # another component already declaring it (kustomize/kubectl apply is idempotent on an
+          # identical object).
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: ${{ values.namespace }}
+            labels:
+              name: ${{ values.namespace }}
+              product: ${{ values.product }}
+              platform: prometeo
+          ---
+          apiVersion: platform.prometeo.iag.ai/v1alpha1
+          kind: ObjectStore
+          metadata:
+            name: ${{ values.name }}
+            namespace: ${{ values.namespace }}
+          spec:
+            product: ${{ values.product }}
+          {% if values.bucketName %}
+            bucketName: {{ values.bucketName | dump }}
+          {% endif %}
+          {% if values.expirationDays %}
+            expirationDays: ${{ values.expirationDays }}
+          {% endif %}
+          {% if values.access and values.access | length %}
+            access:
+          {% for a in values.access %}
+              - service: {{ a.service }}
+                level: {{ a.level }}
+          {% endfor %}
+          {% endif %}
+
+    - id: publish
+      name: Open a PR with the new bucket
+      action: publish:github:pull-request
+      input:
+        repoUrl: github.com?repo=prometeo-products&owner=crossplane-poc
+        branchName: scaffolder/s3-${{ values.product }}-${{ values.name }}
+        title: 'prometeo s3: ${{ values.product }}/${{ values.name }}'
+        description: >-
+          Adds `products/${{ values.product }}/base/${{ values.name }}.yaml` (ObjectStore) via
+          the prometeo-s3 Backstage template.
+
+  output:
+    links:
+      - title: Open PR
+        url: ${{ steps['publish'].output.remoteUrl }}
