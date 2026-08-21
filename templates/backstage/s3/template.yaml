@@ -67,7 +67,7 @@ spec:
       name: Write the ObjectStore manifest
       action: roadiehq:utils:fs:write
       input:
-        path: products/${{ values.product }}/base/${{ values.name }}.yaml
+        path: products/${{ parameters.product }}/base/${{ parameters.name }}.yaml
         content: |
           # The Namespace object is repeated harmlessly if this bucket shares a namespace with
           # another component already declaring it (kustomize/kubectl apply is idempotent on an
@@ -75,43 +75,62 @@ spec:
           apiVersion: v1
           kind: Namespace
           metadata:
-            name: ${{ values.namespace }}
+            name: ${{ parameters.namespace }}
             labels:
-              name: ${{ values.namespace }}
-              product: ${{ values.product }}
+              name: ${{ parameters.namespace }}
+              product: ${{ parameters.product }}
               platform: prometeo
           ---
           apiVersion: platform.prometeo.iag.ai/v1alpha1
           kind: ObjectStore
           metadata:
-            name: ${{ values.name }}
-            namespace: ${{ values.namespace }}
+            name: ${{ parameters.name }}
+            namespace: ${{ parameters.namespace }}
           spec:
-            product: ${{ values.product }}
-          {% if values.bucketName %}
-            bucketName: {{ values.bucketName | dump }}
+            product: ${{ parameters.product }}
+          {% if parameters.bucketName %}
+            bucketName: {{ parameters.bucketName | dump }}
           {% endif %}
-          {% if values.expirationDays %}
-            expirationDays: ${{ values.expirationDays }}
+          {% if parameters.expirationDays %}
+            expirationDays: ${{ parameters.expirationDays }}
           {% endif %}
-          {% if values.access and values.access | length %}
+          {% if parameters.access and parameters.access | length %}
             access:
-          {% for a in values.access %}
+          {% for a in parameters.access %}
               - service: {{ a.service }}
                 level: {{ a.level }}
           {% endfor %}
           {% endif %}
+
+    - id: write-catalog-info
+      name: Write the Backstage Resource entity
+      action: roadiehq:utils:fs:write
+      input:
+        path: products/${{ parameters.product }}/components/${{ parameters.name }}.yaml
+        content: |
+          apiVersion: backstage.io/v1alpha1
+          kind: Resource
+          metadata:
+            name: ${{ parameters.name }}
+            description: ${{ ('ObjectStore ' + parameters.name + ' (product ' + parameters.product + ')') | dump }}
+            annotations:
+              backstage.io/kubernetes-namespace: ${{ parameters.namespace }}
+          spec:
+            type: object-store
+            lifecycle: experimental
+            owner: guests
+            system: ${{ parameters.product }}
 
     - id: publish
       name: Open a PR with the new bucket
       action: publish:github:pull-request
       input:
         repoUrl: github.com?repo=prometeo-products&owner=crossplane-poc
-        branchName: scaffolder/s3-${{ values.product }}-${{ values.name }}
-        title: 'prometeo s3: ${{ values.product }}/${{ values.name }}'
+        branchName: scaffolder/s3-${{ parameters.product }}-${{ parameters.name }}
+        title: 'prometeo s3: ${{ parameters.product }}/${{ parameters.name }}'
         description: >-
-          Adds `products/${{ values.product }}/base/${{ values.name }}.yaml` (ObjectStore) via
-          the "s3" Backstage template.
+          Adds `products/${{ parameters.product }}/base/${{ parameters.name }}.yaml` (ObjectStore) and
+          its Backstage Resource entity, via the "s3" template.
 
   output:
     links:
