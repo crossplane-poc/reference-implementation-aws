@@ -59,7 +59,6 @@ metadata:
   namespace: keycloak
   annotations:
     argocd.argoproj.io/sync-wave: "40"
-    canary-check: "v2"
 data:
   client-scope-groups-payload.json: |
     {
