@@ -9,7 +9,7 @@ spec:
         repoURL: https://github.com/crossplane-poc/prometeo-products.git
         revision: main
         directories:
-          - path: products/*/envs/sb3
+          - path: products/*/base
   template:
     metadata:
       name: 'prometeo-{{path[1]}}-sb3'
@@ -19,6 +19,11 @@ spec:
         repoURL: https://github.com/crossplane-poc/prometeo-products.git
         targetRevision: main
         path: '{{path}}'
+        # Plain manifests, not Kustomize — each component template drops a self-contained
+        # Namespace+XR file here with no shared resources: list to keep in sync, on purpose (see
+        # commit message). ArgoCD applies every yaml file in the directory directly.
+        directory:
+          recurse: false
       destination:
         server: https://kubernetes.default.svc
       syncPolicy:

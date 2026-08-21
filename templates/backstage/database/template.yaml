@@ -7,8 +7,7 @@ metadata:
     An Aurora PostgreSQL Serverless v2 cluster — a Prometeo PostgresDatabase. Replaces
     tf-common-modules/modules/rds. Use this only for a database shared by more than one service;
     a database private to one backend belongs on the "statefulbackend" template instead. The
-    product must already exist (run the "product" template first) with this file's name listed
-    in its componentFiles.
+    product must already exist (run the "product" template first).
   tags:
     - prometeo
 spec:
