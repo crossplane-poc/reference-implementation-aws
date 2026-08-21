@@ -1,8 +1,8 @@
 apiVersion: scaffolder.backstage.io/v1beta3
 kind: Template
 metadata:
-  name: prometeo-product
-  title: "Prometeo: bootstrap a product"
+  name: product
+  title: "Bootstrap a product"
   description: >-
     Step 1 for a new product built from Prometeo's native Crossplane components. Creates the
     product's skeleton (Kustomize base + sb3 overlay + a Backstage System entity) in
@@ -33,8 +33,8 @@ spec:
           title: Component files
           type: array
           description: >-
-            Filenames you're about to add with the prometeo-service / prometeo-database /
-            prometeo-statefulbackend / prometeo-s3 templates, e.g. ["add-fe.yaml", "add-be.yaml"].
+            Filenames you're about to add with the service / database / statefulbackend / s3
+            templates, e.g. ["add-fe.yaml", "add-be.yaml"].
             Kustomize needs the full list up front — add the matching component right after this
             PR merges, using exactly these filenames.
           items:
@@ -97,7 +97,7 @@ spec:
         title: 'prometeo product: bootstrap ${{ values.name }}'
         description: >-
           Bootstraps `products/${{ values.name }}/` (base + sb3 overlay + System entity), via the
-          prometeo-product Backstage template. Add ${{ values.componentFiles | join(', ') }} next.
+          "product" Backstage template. Add ${{ values.componentFiles | join(', ') }} next.
 
   output:
     links:

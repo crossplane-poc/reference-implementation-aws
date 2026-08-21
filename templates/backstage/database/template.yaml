@@ -1,14 +1,14 @@
 apiVersion: scaffolder.backstage.io/v1beta3
 kind: Template
 metadata:
-  name: prometeo-database
-  title: "Prometeo: database"
+  name: database
+  title: "Database"
   description: >-
     An Aurora PostgreSQL Serverless v2 cluster — a Prometeo PostgresDatabase. Replaces
     tf-common-modules/modules/rds. Use this only for a database shared by more than one service;
-    a database private to one backend belongs on prometeo-statefulbackend instead. The product
-    must already exist (run prometeo-product first) with this file's name listed in its
-    componentFiles.
+    a database private to one backend belongs on the "statefulbackend" template instead. The
+    product must already exist (run the "product" template first) with this file's name listed
+    in its componentFiles.
   tags:
     - prometeo
 spec:
@@ -37,7 +37,7 @@ spec:
           description: >-
             Shared by more than one service? Use "<product>-<name>" (e.g. "cms-db") and it'll be
             created for you. Private to one service? Use that service's own namespace instead —
-            and prefer prometeo-statefulbackend, which bundles this for you.
+            and prefer the "statefulbackend" template, which bundles this for you.
         databaseName:
           title: Database name inside the cluster
           type: string
@@ -155,7 +155,7 @@ spec:
         title: 'prometeo database: ${{ values.product }}/${{ values.name }}'
         description: >-
           Adds `products/${{ values.product }}/base/${{ values.name }}.yaml` (PostgresDatabase)
-          via the prometeo-database Backstage template.
+          via the "database" Backstage template.
 
   output:
     links:
