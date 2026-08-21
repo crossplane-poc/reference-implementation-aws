@@ -38,7 +38,6 @@ spec:
           ui:options:
             catalogFilter:
               kind: [Component, Resource]
-              spec.system: ${{ parameters.product }}
             defaultKind: Component
         reason:
           title: Reason for deletion

@@ -69,7 +69,6 @@ spec:
             catalogFilter:
               kind: Resource
               spec.type: database
-              spec.system: ${{ parameters.product }}
             defaultKind: Resource
           default: []
         migrationsEnabled:
@@ -130,7 +129,6 @@ spec:
                 ui:options:
                   catalogFilter:
                     kind: Component
-                    spec.system: ${{ parameters.product }}
                   defaultKind: Component
               port:
                 type: integer
@@ -148,7 +146,6 @@ spec:
                 ui:options:
                   catalogFilter:
                     kind: Component
-                    spec.system: ${{ parameters.product }}
                   defaultKind: Component
               port:
                 type: integer
