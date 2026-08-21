@@ -64,13 +64,13 @@ spec:
             <name>-connection ConfigMap), e.g. ["db"].
           items:
             type: string
-            ui:field: EntityPicker
-            ui:options:
-              catalogFilter:
-                kind: Resource
-                spec.type: database
-                spec.system: ${{ parameters.product }}
-              defaultKind: Resource
+          ui:field: MultiEntityPicker
+          ui:options:
+            catalogFilter:
+              kind: Resource
+              spec.type: database
+              spec.system: ${{ parameters.product }}
+            defaultKind: Resource
           default: []
         migrationsEnabled:
           title: Run schema migrations before rollout

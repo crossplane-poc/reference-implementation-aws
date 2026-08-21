@@ -30,6 +30,11 @@ spec:
           title: Product
           type: string
           description: The product this database belongs to (must already exist in prometeo-products).
+          ui:field: EntityPicker
+          ui:options:
+            catalogFilter:
+              kind: System
+            defaultKind: System
         namespace:
           title: Namespace
           type: string
@@ -73,6 +78,12 @@ spec:
             properties:
               service:
                 type: string
+                ui:field: EntityPicker
+                ui:options:
+                  catalogFilter:
+                    kind: Component
+                    spec.system: ${{ parameters.product }}
+                  defaultKind: Component
               level:
                 type: string
                 enum: [connect, admin]
