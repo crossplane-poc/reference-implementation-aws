@@ -31,6 +31,11 @@ spec:
           title: Product
           type: string
           description: The product this service belongs to (must already exist in prometeo-products).
+          ui:field: EntityPicker
+          ui:options:
+            catalogFilter:
+              kind: System
+            defaultKind: System
         image:
           title: Container image
           type: string
@@ -59,6 +64,13 @@ spec:
             <name>-connection ConfigMap), e.g. ["db"].
           items:
             type: string
+            ui:field: EntityPicker
+            ui:options:
+              catalogFilter:
+                kind: Resource
+                spec.type: database
+                spec.system: ${{ parameters.product }}
+              defaultKind: Resource
           default: []
         migrationsEnabled:
           title: Run schema migrations before rollout
@@ -114,6 +126,12 @@ spec:
             properties:
               service:
                 type: string
+                ui:field: EntityPicker
+                ui:options:
+                  catalogFilter:
+                    kind: Component
+                    spec.system: ${{ parameters.product }}
+                  defaultKind: Component
               port:
                 type: integer
           default: []
@@ -126,6 +144,12 @@ spec:
             properties:
               service:
                 type: string
+                ui:field: EntityPicker
+                ui:options:
+                  catalogFilter:
+                    kind: Component
+                    spec.system: ${{ parameters.product }}
+                  defaultKind: Component
               port:
                 type: integer
           default: []
