@@ -50,10 +50,10 @@ spec:
       action: publish:github:pull-request
       input:
         repoUrl: github.com?repo=prometeo-products&owner=crossplane-poc
-        branchName: scaffolder/delete-${{ parameters.product }}-${{ parameters.component | parseEntityRef | pick('name') }}
-        title: "prometeo delete: ${{ parameters.product }}/${{ parameters.component | parseEntityRef | pick('name') }}"
+        branchName: scaffolder/delete-${{ parameters.product | parseEntityRef | pick('name') }}-${{ parameters.component | parseEntityRef | pick('name') }}
+        title: "prometeo delete: ${{ parameters.product | parseEntityRef | pick('name') }}/${{ parameters.component | parseEntityRef | pick('name') }}"
         description: >-
-          Removes `products/${{ parameters.product }}/base/${{ parameters.component | parseEntityRef | pick('name') }}.yaml`
+          Removes `products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ parameters.component | parseEntityRef | pick('name') }}.yaml`
           and its Backstage entity, via the "delete" template.
 
 
@@ -62,8 +62,8 @@ spec:
 
           **Merging this PR deletes the live infrastructure. This cannot be undone.**
         filesToDelete:
-          - products/${{ parameters.product }}/base/${{ parameters.component | parseEntityRef | pick('name') }}.yaml
-          - products/${{ parameters.product }}/components/${{ parameters.component | parseEntityRef | pick('name') }}.yaml
+          - products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ parameters.component | parseEntityRef | pick('name') }}.yaml
+          - products/${{ parameters.product | parseEntityRef | pick('name') }}/components/${{ parameters.component | parseEntityRef | pick('name') }}.yaml
 
   output:
     links:

@@ -103,7 +103,7 @@ spec:
       name: Write the PostgresDatabase manifest
       action: roadiehq:utils:fs:write
       input:
-        path: products/${{ parameters.product }}/base/${{ parameters.name }}.yaml
+        path: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ parameters.name }}.yaml
         content: |
           # The Namespace object is repeated harmlessly if this database shares a namespace with
           # another component already declaring it (kustomize/kubectl apply is idempotent on an
@@ -115,7 +115,7 @@ spec:
             name: ${{ parameters.namespace }}
             labels:
               name: ${{ parameters.namespace }}
-              product: ${{ parameters.product }}
+              product: ${{ parameters.product | parseEntityRef | pick('name') }}
               platform: prometeo
           ---
           apiVersion: platform.prometeo.iag.ai/v1alpha1
@@ -124,7 +124,7 @@ spec:
             name: ${{ parameters.name }}
             namespace: ${{ parameters.namespace }}
           spec:
-            product: ${{ parameters.product }}
+            product: ${{ parameters.product | parseEntityRef | pick('name') }}
           {% if parameters.databaseName %}
             databaseName: {{ parameters.databaseName | dump }}
           {% endif %}
@@ -159,30 +159,30 @@ spec:
       name: Write the Backstage Resource entity
       action: roadiehq:utils:fs:write
       input:
-        path: products/${{ parameters.product }}/components/${{ parameters.name }}.yaml
+        path: products/${{ parameters.product | parseEntityRef | pick('name') }}/components/${{ parameters.name }}.yaml
         content: |
           apiVersion: backstage.io/v1alpha1
           kind: Resource
           metadata:
             name: ${{ parameters.name }}
-            description: ${{ ('PostgresDatabase ' + parameters.name + ' (product ' + parameters.product + ')') | dump }}
+            description: ${{ ('PostgresDatabase ' + parameters.name + ' (product ' + (parameters.product | parseEntityRef | pick('name')) + ')') | dump }}
             annotations:
               backstage.io/kubernetes-namespace: ${{ parameters.namespace }}
           spec:
             type: database
             lifecycle: experimental
             owner: guests
-            system: ${{ parameters.product }}
+            system: ${{ parameters.product | parseEntityRef | pick('name') }}
 
     - id: publish
       name: Open a PR with the new database
       action: publish:github:pull-request
       input:
         repoUrl: github.com?repo=prometeo-products&owner=crossplane-poc
-        branchName: scaffolder/database-${{ parameters.product }}-${{ parameters.name }}
-        title: 'prometeo database: ${{ parameters.product }}/${{ parameters.name }}'
+        branchName: scaffolder/database-${{ parameters.product | parseEntityRef | pick('name') }}-${{ parameters.name }}
+        title: "prometeo database: ${{ parameters.product | parseEntityRef | pick('name') }}/${{ parameters.name }}"
         description: >-
-          Adds `products/${{ parameters.product }}/base/${{ parameters.name }}.yaml` (PostgresDatabase)
+          Adds `products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ parameters.name }}.yaml` (PostgresDatabase)
           and its Backstage Resource entity, via the "database" template.
 
   output:
