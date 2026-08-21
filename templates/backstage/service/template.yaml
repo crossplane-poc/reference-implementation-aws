@@ -135,85 +135,104 @@ spec:
       name: Write the AppService manifest
       action: roadiehq:utils:fs:write
       input:
-        path: products/${{ values.product }}/base/${{ values.name }}.yaml
+        path: products/${{ parameters.product }}/base/${{ parameters.name }}.yaml
         content: |
           apiVersion: v1
           kind: Namespace
           metadata:
-            name: ${{ values.name }}
+            name: ${{ parameters.name }}
             labels:
-              name: ${{ values.name }}
-              service: ${{ values.name }}
-              product: ${{ values.product }}
+              name: ${{ parameters.name }}
+              service: ${{ parameters.name }}
+              product: ${{ parameters.product }}
               platform: prometeo
               admission.datadoghq.com/enabled: "true"
           ---
           apiVersion: platform.prometeo.iag.ai/v1alpha1
           kind: AppService
           metadata:
-            name: ${{ values.name }}
-            namespace: ${{ values.name }}
+            name: ${{ parameters.name }}
+            namespace: ${{ parameters.name }}
           spec:
-            product: ${{ values.product }}
-            image: ${{ values.image | dump }}
-            containerPort: ${{ values.containerPort }}
-          {% if values.replicas %}
-            replicas: {{ values.replicas }}
+            product: ${{ parameters.product }}
+            image: ${{ parameters.image | dump }}
+            containerPort: ${{ parameters.containerPort }}
+          {% if parameters.replicas %}
+            replicas: {{ parameters.replicas }}
           {% endif %}
-          {% if values.env and values.env | length %}
+          {% if parameters.env and parameters.env | length %}
             env:
-          {% for k, v in values.env %}
+          {% for k, v in parameters.env %}
               {{ k }}: {{ v | dump }}
           {% endfor %}
           {% endif %}
-          {% if values.connections and values.connections | length %}
+          {% if parameters.connections and parameters.connections | length %}
             connections:
-          {% for c in values.connections %}
+          {% for c in parameters.connections %}
               - {{ c }}
           {% endfor %}
           {% endif %}
             migrations:
-              enabled: ${{ values.migrationsEnabled }}
+              enabled: ${{ parameters.migrationsEnabled }}
             aws:
-              bedrock: ${{ values.awsBedrock }}
-              s3: ${{ values.awsS3 }}
-              sqs: ${{ values.awsSqs }}
-              dynamodb: ${{ values.awsDynamodb }}
+              bedrock: ${{ parameters.awsBedrock }}
+              s3: ${{ parameters.awsS3 }}
+              sqs: ${{ parameters.awsSqs }}
+              dynamodb: ${{ parameters.awsDynamodb }}
             ingress:
-              enabled: ${{ values.ingressEnabled }}
-          {% if values.ingressHost %}
-              host: {{ values.ingressHost | dump }}
+              enabled: ${{ parameters.ingressEnabled }}
+          {% if parameters.ingressHost %}
+              host: {{ parameters.ingressHost | dump }}
           {% endif %}
-              dnsRecord: ${{ values.ingressDnsRecord }}
-              healthcheckPath: ${{ values.healthcheckPath | dump }}
-          {% if (values.allowFrom and values.allowFrom | length) or (values.allowTo and values.allowTo | length) %}
+              dnsRecord: ${{ parameters.ingressDnsRecord }}
+              healthcheckPath: ${{ parameters.healthcheckPath | dump }}
+          {% if (parameters.allowFrom and parameters.allowFrom | length) or (parameters.allowTo and parameters.allowTo | length) %}
             network:
-          {% if values.allowFrom and values.allowFrom | length %}
+          {% if parameters.allowFrom and parameters.allowFrom | length %}
               allowFrom:
-          {% for r in values.allowFrom %}
+          {% for r in parameters.allowFrom %}
                 - service: {{ r.service }}
                   port: {{ r.port }}
           {% endfor %}
           {% endif %}
-          {% if values.allowTo and values.allowTo | length %}
+          {% if parameters.allowTo and parameters.allowTo | length %}
               allowTo:
-          {% for r in values.allowTo %}
+          {% for r in parameters.allowTo %}
                 - service: {{ r.service }}
                   port: {{ r.port }}
           {% endfor %}
           {% endif %}
           {% endif %}
 
+    - id: write-catalog-info
+      name: Write the Backstage Component entity
+      action: roadiehq:utils:fs:write
+      input:
+        path: products/${{ parameters.product }}/components/${{ parameters.name }}.yaml
+        content: |
+          apiVersion: backstage.io/v1alpha1
+          kind: Component
+          metadata:
+            name: ${{ parameters.name }}
+            description: ${{ ('AppService ' + parameters.name + ' (product ' + parameters.product + ')') | dump }}
+            annotations:
+              backstage.io/kubernetes-label-selector: 'service=${{ parameters.name }}'
+          spec:
+            type: service
+            lifecycle: experimental
+            owner: guests
+            system: ${{ parameters.product }}
+
     - id: publish
       name: Open a PR with the new service
       action: publish:github:pull-request
       input:
         repoUrl: github.com?repo=prometeo-products&owner=crossplane-poc
-        branchName: scaffolder/service-${{ values.name }}
-        title: 'prometeo service: ${{ values.name }}'
+        branchName: scaffolder/service-${{ parameters.name }}
+        title: 'prometeo service: ${{ parameters.name }}'
         description: >-
-          Adds `products/${{ values.product }}/base/${{ values.name }}.yaml` (Namespace +
-          AppService) via the "service" Backstage template.
+          Adds `products/${{ parameters.product }}/base/${{ parameters.name }}.yaml` (Namespace +
+          AppService) and its Backstage Component entity, via the "service" template.
 
   output:
     links:

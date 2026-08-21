@@ -33,15 +33,15 @@ spec:
       name: Write the product's System entity
       action: roadiehq:utils:fs:write
       input:
-        path: products/${{ values.name }}/catalog-info.yaml
+        path: products/${{ parameters.name }}/catalog-info.yaml
         content: |
           apiVersion: backstage.io/v1alpha1
           kind: System
           metadata:
-            name: ${{ values.name }}
-            description: ${{ (values.description | default('Prometeo product ' + values.name)) | dump }}
+            name: ${{ parameters.name }}
+            description: ${{ (parameters.description | default('Prometeo product ' + parameters.name)) | dump }}
             annotations:
-              backstage.io/kubernetes-label-selector: 'product=${{ values.name }},platform=prometeo'
+              backstage.io/kubernetes-label-selector: 'product=${{ parameters.name }},platform=prometeo'
           spec:
             owner: guests
             lifecycle: experimental
@@ -52,12 +52,12 @@ spec:
       action: publish:github:pull-request
       input:
         repoUrl: github.com?repo=prometeo-products&owner=crossplane-poc
-        branchName: scaffolder/product-${{ values.name }}
-        title: 'prometeo product: bootstrap ${{ values.name }}'
+        branchName: scaffolder/product-${{ parameters.name }}
+        title: 'prometeo product: bootstrap ${{ parameters.name }}'
         description: >-
-          Adds `products/${{ values.name }}/catalog-info.yaml` (System entity) via the "product"
+          Adds `products/${{ parameters.name }}/catalog-info.yaml` (System entity) via the "product"
           Backstage template. Add its service/database/statefulbackend/s3 components next — each
-          lands in `products/${{ values.name }}/base/` and gets picked up automatically, no file
+          lands in `products/${{ parameters.name }}/base/` and gets picked up automatically, no file
           list to maintain.
 
   output:

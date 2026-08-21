@@ -93,7 +93,7 @@ spec:
       name: Write the PostgresDatabase manifest
       action: roadiehq:utils:fs:write
       input:
-        path: products/${{ values.product }}/base/${{ values.name }}.yaml
+        path: products/${{ parameters.product }}/base/${{ parameters.name }}.yaml
         content: |
           # The Namespace object is repeated harmlessly if this database shares a namespace with
           # another component already declaring it (kustomize/kubectl apply is idempotent on an
@@ -102,59 +102,78 @@ spec:
           apiVersion: v1
           kind: Namespace
           metadata:
-            name: ${{ values.namespace }}
+            name: ${{ parameters.namespace }}
             labels:
-              name: ${{ values.namespace }}
-              product: ${{ values.product }}
+              name: ${{ parameters.namespace }}
+              product: ${{ parameters.product }}
               platform: prometeo
           ---
           apiVersion: platform.prometeo.iag.ai/v1alpha1
           kind: PostgresDatabase
           metadata:
-            name: ${{ values.name }}
-            namespace: ${{ values.namespace }}
+            name: ${{ parameters.name }}
+            namespace: ${{ parameters.namespace }}
           spec:
-            product: ${{ values.product }}
-          {% if values.databaseName %}
-            databaseName: {{ values.databaseName | dump }}
+            product: ${{ parameters.product }}
+          {% if parameters.databaseName %}
+            databaseName: {{ parameters.databaseName | dump }}
           {% endif %}
-          {% if values.engineVersion %}
-            engineVersion: {{ values.engineVersion | dump }}
+          {% if parameters.engineVersion %}
+            engineVersion: {{ parameters.engineVersion | dump }}
           {% endif %}
-          {% if values.schemas and values.schemas | length %}
+          {% if parameters.schemas and parameters.schemas | length %}
             schemas:
-          {% for s in values.schemas %}
+          {% for s in parameters.schemas %}
               - {{ s }}
           {% endfor %}
           {% endif %}
             capacity:
-              instances: ${{ values.instances }}
-          {% if values.minACU %}
-              minACU: {{ values.minACU }}
+              instances: ${{ parameters.instances }}
+          {% if parameters.minACU %}
+              minACU: {{ parameters.minACU }}
           {% endif %}
-          {% if values.maxACU %}
-              maxACU: {{ values.maxACU }}
+          {% if parameters.maxACU %}
+              maxACU: {{ parameters.maxACU }}
           {% endif %}
-          {% if values.access and values.access | length %}
+          {% if parameters.access and parameters.access | length %}
             access:
-          {% for a in values.access %}
+          {% for a in parameters.access %}
               - service: {{ a.service }}
                 level: {{ a.level }}
           {% endfor %}
           {% endif %}
-            backupRetentionDays: ${{ values.backupRetentionDays }}
-            deletionProtection: ${{ values.deletionProtection }}
+            backupRetentionDays: ${{ parameters.backupRetentionDays }}
+            deletionProtection: ${{ parameters.deletionProtection }}
+
+    - id: write-catalog-info
+      name: Write the Backstage Resource entity
+      action: roadiehq:utils:fs:write
+      input:
+        path: products/${{ parameters.product }}/components/${{ parameters.name }}.yaml
+        content: |
+          apiVersion: backstage.io/v1alpha1
+          kind: Resource
+          metadata:
+            name: ${{ parameters.name }}
+            description: ${{ ('PostgresDatabase ' + parameters.name + ' (product ' + parameters.product + ')') | dump }}
+            annotations:
+              backstage.io/kubernetes-namespace: ${{ parameters.namespace }}
+          spec:
+            type: database
+            lifecycle: experimental
+            owner: guests
+            system: ${{ parameters.product }}
 
     - id: publish
       name: Open a PR with the new database
       action: publish:github:pull-request
       input:
         repoUrl: github.com?repo=prometeo-products&owner=crossplane-poc
-        branchName: scaffolder/database-${{ values.product }}-${{ values.name }}
-        title: 'prometeo database: ${{ values.product }}/${{ values.name }}'
+        branchName: scaffolder/database-${{ parameters.product }}-${{ parameters.name }}
+        title: 'prometeo database: ${{ parameters.product }}/${{ parameters.name }}'
         description: >-
-          Adds `products/${{ values.product }}/base/${{ values.name }}.yaml` (PostgresDatabase)
-          via the "database" Backstage template.
+          Adds `products/${{ parameters.product }}/base/${{ parameters.name }}.yaml` (PostgresDatabase)
+          and its Backstage Resource entity, via the "database" template.
 
   output:
     links:
