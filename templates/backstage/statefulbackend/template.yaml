@@ -7,7 +7,7 @@ metadata:
     A backend and the database it owns, as one bundle — a Prometeo StatefulBackend. Use this when
     a backend owns its database exclusively; when several services share one database, use the
     "service" template plus a separate "database" instead. The product must already exist (run
-    the "product" template first) with this file's name listed in its componentFiles.
+    the "product" template first).
   tags:
     - prometeo
 spec:
@@ -25,7 +25,7 @@ spec:
           type: string
           description: >-
             e.g. "add-be". Becomes the XR name and its own namespace, shared with the database it
-            owns — must match a filename you listed in the product's componentFiles.
+            owns.
           pattern: '^[a-z][a-z0-9-]*$'
           ui:autofocus: true
         product:

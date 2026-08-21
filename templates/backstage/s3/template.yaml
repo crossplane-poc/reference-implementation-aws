@@ -6,8 +6,7 @@ metadata:
   description: >-
     One S3 bucket, encrypted with its own key, private, versioned — a Prometeo ObjectStore.
     Replaces tf-common-modules/modules/s3 plus its per-product IAM access policy. The product
-    must already exist (run the "product" template first) with this file's name listed in its
-    componentFiles.
+    must already exist (run the "product" template first).
   tags:
     - prometeo
 spec:

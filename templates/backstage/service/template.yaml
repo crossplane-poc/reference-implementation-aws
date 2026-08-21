@@ -6,7 +6,7 @@ metadata:
   description: >-
     One runnable service (a Deployment, its AWS identity, its network rules) — a Prometeo
     AppService. Replaces tf-common-modules/modules/bootstrap-service. The product must already
-    exist (run the "product" template first) with this file's name listed in its componentFiles.
+    exist (run the "product" template first).
   tags:
     - prometeo
 spec:
@@ -24,7 +24,7 @@ spec:
           type: string
           description: >-
             e.g. "add-fe". Becomes the XR name and its own namespace (one namespace per service,
-            not per product) — must match a filename you listed in the product's componentFiles.
+            not per product).
           pattern: '^[a-z][a-z0-9-]*$'
           ui:autofocus: true
         product:
