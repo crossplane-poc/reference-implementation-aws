@@ -1,12 +1,12 @@
 apiVersion: scaffolder.backstage.io/v1beta3
 kind: Template
 metadata:
-  name: prometeo-service
-  title: "Prometeo: service"
+  name: service
+  title: "Service"
   description: >-
     One runnable service (a Deployment, its AWS identity, its network rules) — a Prometeo
     AppService. Replaces tf-common-modules/modules/bootstrap-service. The product must already
-    exist (run prometeo-product first) with this file's name listed in its componentFiles.
+    exist (run the "product" template first) with this file's name listed in its componentFiles.
   tags:
     - prometeo
 spec:
@@ -213,7 +213,7 @@ spec:
         title: 'prometeo service: ${{ values.name }}'
         description: >-
           Adds `products/${{ values.product }}/base/${{ values.name }}.yaml` (Namespace +
-          AppService) via the prometeo-service Backstage template.
+          AppService) via the "service" Backstage template.
 
   output:
     links:

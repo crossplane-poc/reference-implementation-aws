@@ -1,13 +1,13 @@
 apiVersion: scaffolder.backstage.io/v1beta3
 kind: Template
 metadata:
-  name: prometeo-statefulbackend
-  title: "Prometeo: statefulbackend"
+  name: statefulbackend
+  title: "Statefulbackend"
   description: >-
     A backend and the database it owns, as one bundle — a Prometeo StatefulBackend. Use this when
-    a backend owns its database exclusively; when several services share one database, use
-    prometeo-service plus a separate prometeo-database instead. The product must already exist
-    (run prometeo-product first) with this file's name listed in its componentFiles.
+    a backend owns its database exclusively; when several services share one database, use the
+    "service" template plus a separate "database" instead. The product must already exist (run
+    the "product" template first) with this file's name listed in its componentFiles.
   tags:
     - prometeo
 spec:
@@ -220,7 +220,7 @@ spec:
         title: 'prometeo statefulbackend: ${{ values.name }}'
         description: >-
           Adds `products/${{ values.product }}/base/${{ values.name }}.yaml` (Namespace +
-          StatefulBackend) via the prometeo-statefulbackend Backstage template.
+          StatefulBackend) via the "statefulbackend" Backstage template.
 
   output:
     links:

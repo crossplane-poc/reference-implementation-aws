@@ -7,11 +7,11 @@ metadata:
     statefulbackend, s3), PR-ing generated manifests into crossplane-poc/prometeo-products.
 spec:
   targets:
-    - ./prometeo-product/template.yaml
-    - ./prometeo-service/template.yaml
-    - ./prometeo-database/template.yaml
-    - ./prometeo-statefulbackend/template.yaml
-    - ./prometeo-s3/template.yaml
+    - ./product/template.yaml
+    - ./service/template.yaml
+    - ./database/template.yaml
+    - ./statefulbackend/template.yaml
+    - ./s3/template.yaml
 ---
 apiVersion: backstage.io/v1alpha1
 kind: Location

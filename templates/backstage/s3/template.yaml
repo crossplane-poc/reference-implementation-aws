@@ -1,12 +1,12 @@
 apiVersion: scaffolder.backstage.io/v1beta3
 kind: Template
 metadata:
-  name: prometeo-s3
-  title: "Prometeo: s3"
+  name: s3
+  title: "S3"
   description: >-
     One S3 bucket, encrypted with its own key, private, versioned — a Prometeo ObjectStore.
     Replaces tf-common-modules/modules/s3 plus its per-product IAM access policy. The product
-    must already exist (run prometeo-product first) with this file's name listed in its
+    must already exist (run the "product" template first) with this file's name listed in its
     componentFiles.
   tags:
     - prometeo
@@ -112,7 +112,7 @@ spec:
         title: 'prometeo s3: ${{ values.product }}/${{ values.name }}'
         description: >-
           Adds `products/${{ values.product }}/base/${{ values.name }}.yaml` (ObjectStore) via
-          the prometeo-s3 Backstage template.
+          the "s3" Backstage template.
 
   output:
     links:
