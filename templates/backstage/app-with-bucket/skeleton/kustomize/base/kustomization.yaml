@@ -1,4 +1,0 @@
-resources:
-  - nginx.yaml
-  - cm-nginx.yaml
-  - ${{ values.name }}.yaml
