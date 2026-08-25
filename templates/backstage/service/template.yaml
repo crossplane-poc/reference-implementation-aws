@@ -202,18 +202,18 @@ spec:
             image: ${{ parameters.image | dump }}
             containerPort: ${{ parameters.containerPort }}
           {% if parameters.replicas %}
-            replicas: {{ parameters.replicas }}
+            replicas: ${{ parameters.replicas }}
           {% endif %}
           {% if parameters.env and parameters.env | length %}
             env:
           {% for k, v in parameters.env %}
-              {{ k }}: {{ v | dump }}
+              ${{ k }}: ${{ v | dump }}
           {% endfor %}
           {% endif %}
           {% if parameters.connections and parameters.connections | length %}
             connections:
           {% for c in parameters.connections %}
-              - {{ c | parseEntityRef | pick('name') }}
+              - ${{ c | parseEntityRef | pick('name') }}
           {% endfor %}
           {% endif %}
             migrations:
@@ -226,7 +226,7 @@ spec:
             ingress:
               enabled: ${{ parameters.ingressEnabled }}
           {% if parameters.ingressHost %}
-              host: {{ parameters.ingressHost | dump }}
+              host: ${{ parameters.ingressHost | dump }}
           {% endif %}
               dnsRecord: ${{ parameters.ingressDnsRecord }}
               healthcheckPath: ${{ parameters.healthcheckPath | dump }}
@@ -235,15 +235,15 @@ spec:
           {% if parameters.allowFrom and parameters.allowFrom | length %}
               allowFrom:
           {% for r in parameters.allowFrom %}
-                - service: {{ r.service | parseEntityRef | pick('name') }}
-                  port: {{ r.port }}
+                - service: ${{ r.service | parseEntityRef | pick('name') }}
+                  port: ${{ r.port }}
           {% endfor %}
           {% endif %}
           {% if parameters.allowTo and parameters.allowTo | length %}
               allowTo:
           {% for r in parameters.allowTo %}
-                - service: {{ r.service | parseEntityRef | pick('name') }}
-                  port: {{ r.port }}
+                - service: ${{ r.service | parseEntityRef | pick('name') }}
+                  port: ${{ r.port }}
           {% endfor %}
           {% endif %}
           {% endif %}
