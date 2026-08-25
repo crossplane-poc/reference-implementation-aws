@@ -4,9 +4,9 @@ metadata:
   name: product
   title: "Bootstrap a product"
   description: >-
-    Step 1 for a new product built from Prometeo's native Crossplane components. Creates the
-    product's Backstage System entity in crossplane-poc/prometeo-products. Run this once per
-    product, before adding any service, database, statefulbackend or s3 component to it.
+    Step 1 for any new product in prometeo-products. Creates only the Backstage System entity
+    (catalog-info.yaml) — no AWS, Crossplane, or Terraform. Run once per product before adding
+    components via Crossplane templates (base/) or S3 (Terraform PR) (terraform/).
   tags:
     - prometeo
 spec:
@@ -56,9 +56,8 @@ spec:
         title: 'prometeo product: bootstrap ${{ parameters.name }}'
         description: >-
           Adds `products/${{ parameters.name }}/catalog-info.yaml` (System entity) via the "product"
-          Backstage template. Add its service/database/statefulbackend/s3 components next — each
-          lands in `products/${{ parameters.name }}/base/` and gets picked up automatically, no file
-          list to maintain.
+          Backstage template. No infrastructure is provisioned. Add components next with Crossplane
+          templates (→ `base/`) or S3 (Terraform PR) (→ `terraform/`).
 
   output:
     links:
