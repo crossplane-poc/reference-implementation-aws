@@ -126,30 +126,30 @@ spec:
           spec:
             product: ${{ parameters.product | parseEntityRef | pick('name') }}
           {% if parameters.databaseName %}
-            databaseName: {{ parameters.databaseName | dump }}
+            databaseName: ${{ parameters.databaseName | dump }}
           {% endif %}
           {% if parameters.engineVersion %}
-            engineVersion: {{ parameters.engineVersion | dump }}
+            engineVersion: ${{ parameters.engineVersion | dump }}
           {% endif %}
           {% if parameters.schemas and parameters.schemas | length %}
             schemas:
           {% for s in parameters.schemas %}
-              - {{ s }}
+              - ${{ s }}
           {% endfor %}
           {% endif %}
             capacity:
               instances: ${{ parameters.instances }}
           {% if parameters.minACU %}
-              minACU: {{ parameters.minACU }}
+              minACU: ${{ parameters.minACU }}
           {% endif %}
           {% if parameters.maxACU %}
-              maxACU: {{ parameters.maxACU }}
+              maxACU: ${{ parameters.maxACU }}
           {% endif %}
           {% if parameters.access and parameters.access | length %}
             access:
           {% for a in parameters.access %}
-              - service: {{ a.service | parseEntityRef | pick('name') }}
-                level: {{ a.level }}
+              - service: ${{ a.service | parseEntityRef | pick('name') }}
+                level: ${{ a.level }}
           {% endfor %}
           {% endif %}
             backupRetentionDays: ${{ parameters.backupRetentionDays }}

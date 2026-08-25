@@ -99,7 +99,7 @@ spec:
           spec:
             product: ${{ parameters.product | parseEntityRef | pick('name') }}
           {% if parameters.bucketName %}
-            bucketName: {{ parameters.bucketName | dump }}
+            bucketName: ${{ parameters.bucketName | dump }}
           {% endif %}
           {% if parameters.expirationDays %}
             expirationDays: ${{ parameters.expirationDays }}
@@ -107,8 +107,8 @@ spec:
           {% if parameters.access and parameters.access | length %}
             access:
           {% for a in parameters.access %}
-              - service: {{ a.service | parseEntityRef | pick('name') }}
-                level: {{ a.level }}
+              - service: ${{ a.service | parseEntityRef | pick('name') }}
+                level: ${{ a.level }}
           {% endfor %}
           {% endif %}
 
