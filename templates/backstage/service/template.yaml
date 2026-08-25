@@ -190,7 +190,7 @@ spec:
           {% if parameters.connections and parameters.connections | length %}
             connections:
           {% for c in parameters.connections %}
-              - {{ c }}
+              - {{ c | parseEntityRef | pick('name') }}
           {% endfor %}
           {% endif %}
             migrations:

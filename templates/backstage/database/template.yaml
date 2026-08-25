@@ -148,7 +148,7 @@ spec:
           {% if parameters.access and parameters.access | length %}
             access:
           {% for a in parameters.access %}
-              - service: {{ a.service }}
+              - service: {{ a.service | parseEntityRef | pick('name') }}
                 level: {{ a.level }}
           {% endfor %}
           {% endif %}
