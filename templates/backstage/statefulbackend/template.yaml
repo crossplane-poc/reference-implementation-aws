@@ -44,9 +44,6 @@ spec:
           title: Container port
           type: integer
           default: 8000
-        replicas:
-          title: Replicas
-          type: integer
     - title: Runtime
       properties:
         env:
@@ -59,7 +56,11 @@ spec:
           title: Run schema migrations before rollout
           type: boolean
           default: false
-    - title: AWS access
+    - title: AWS Services
+      description: >-
+        Opens the matching VPC interface endpoint's NetworkPolicy and grants the IAM. SQS and
+        DynamoDB are not here on purpose — a queue or a table is its own component, and declaring
+        it grants the access along with it.
       properties:
         awsBedrock:
           title: Bedrock
@@ -69,22 +70,37 @@ spec:
           title: S3
           type: boolean
           default: false
-        awsSqs:
-          title: SQS
-          type: boolean
-          default: false
-        awsDynamodb:
-          title: DynamoDB
-          type: boolean
-          default: false
+        s3Connections:
+          title: S3 buckets
+          type: array
+          description: >-
+            Existing buckets in this product to connect to. Each one's <name>-connection
+            ConfigMap is mounted, supplying S3_BUCKET. Crossplane ObjectStores only — a bucket
+            provisioned by the Terraform template publishes no ConfigMap to mount.
+          items:
+            type: string
+          ui:field: MultiEntityPicker
+          ui:options:
+            catalogFilter:
+              kind: Resource
+              spec.type: object-store
+            defaultKind: Resource
+          default: []
     - title: Network
+      description: >-
+        Everything is denied by default; each entry opens one direction to one peer. The port is
+        never asked for because it is never a choice: a connection is only allowed when both ends
+        permit it, and the receiving end always pins it to its own container port. So the
+        ingress rule uses this service's container port, and the egress rule needs no port at all
+        — the peer's own ingress rule is what constrains it.
       properties:
         allowFrom:
           title: Allow from
           type: array
+          description: Services that may call this one. No port to pick — see the section note.
           items:
             type: object
-            required: [service, port]
+            required: [service]
             properties:
               service:
                 type: string
@@ -93,15 +109,14 @@ spec:
                   catalogFilter:
                     kind: Component
                   defaultKind: Component
-              port:
-                type: integer
           default: []
         allowTo:
           title: Allow to
           type: array
+          description: Services that may this one may call. No port to pick — see the section note.
           items:
             type: object
-            required: [service, port]
+            required: [service]
             properties:
               service:
                 type: string
@@ -110,8 +125,6 @@ spec:
                   catalogFilter:
                     kind: Component
                   defaultKind: Component
-              port:
-                type: integer
           default: []
     - title: Its database
       properties:
@@ -193,9 +206,7 @@ spec:
             product: ${{ parameters.product | parseEntityRef | pick('name') }}
             image: ${{ parameters.image | dump }}
             containerPort: ${{ parameters.containerPort }}
-          {% if parameters.replicas %}
-            replicas: ${{ parameters.replicas }}
-          {% endif %}
+            replicas: 1
           {% if parameters.env and parameters.env | length %}
             env:
           {% for k, v in parameters.env %}
@@ -207,22 +218,24 @@ spec:
             aws:
               bedrock: ${{ parameters.awsBedrock }}
               s3: ${{ parameters.awsS3 }}
-              sqs: ${{ parameters.awsSqs }}
-              dynamodb: ${{ parameters.awsDynamodb }}
+          {% if parameters.s3Connections and parameters.s3Connections | length %}
+            connections:
+          {% for c in parameters.s3Connections %}
+              - ${{ c | parseEntityRef | pick('name') }}
+          {% endfor %}
+          {% endif %}
           {% if (parameters.allowFrom and parameters.allowFrom | length) or (parameters.allowTo and parameters.allowTo | length) %}
             network:
           {% if parameters.allowFrom and parameters.allowFrom | length %}
               allowFrom:
           {% for r in parameters.allowFrom %}
                 - service: ${{ r.service | parseEntityRef | pick('name') }}
-                  port: ${{ r.port }}
           {% endfor %}
           {% endif %}
           {% if parameters.allowTo and parameters.allowTo | length %}
               allowTo:
           {% for r in parameters.allowTo %}
                 - service: ${{ r.service | parseEntityRef | pick('name') }}
-                  port: ${{ r.port }}
           {% endfor %}
           {% endif %}
           {% endif %}
@@ -283,24 +296,24 @@ spec:
           - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
             find: '\n    allowTo:\n'
-            replaceWith: "\n    allowTo:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }\n"
+            replaceWith: "\n    allowTo:\n      - { service: ${{ parameters.name }} }\n"
           # 2. The key is there but empty (`allowTo: []`, the XRD default) -- open a block list.
           - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
             find: '\n    allowTo: \[\]\n'
-            replaceWith: "\n    allowTo:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }\n"
+            replaceWith: "\n    allowTo:\n      - { service: ${{ parameters.name }} }\n"
           # 3. A network: block with no allowTo key at all -- add the key. The anchor stops
           #    at `network:` without taking the newline: the lookahead needs that newline
           #    left in place to recognise a key sitting on the very next line.
           - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
             find: '\n  network:(?![\s\S]*\n    allowTo:)'
-            replaceWith: "\n  network:\n    allowTo:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }"
+            replaceWith: "\n  network:\n    allowTo:\n      - { service: ${{ parameters.name }} }"
           # 4. No network: block at all (lookahead) -- open one directly under spec:.
           - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
             find: '\nspec:(?![\s\S]*\n  network:)'
-            replaceWith: "\nspec:\n  network:\n    allowTo:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }"
+            replaceWith: "\nspec:\n  network:\n    allowTo:\n      - { service: ${{ parameters.name }} }"
 
     - id: mirror-allow-to
       name: Mirror each "allow to" rule as the peer's allowFrom
@@ -317,24 +330,24 @@ spec:
           - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
             find: '\n    allowFrom:\n'
-            replaceWith: "\n    allowFrom:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }\n"
+            replaceWith: "\n    allowFrom:\n      - { service: ${{ parameters.name }} }\n"
           # 2. The key is there but empty (`allowFrom: []`, the XRD default) -- open a block list.
           - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
             find: '\n    allowFrom: \[\]\n'
-            replaceWith: "\n    allowFrom:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }\n"
+            replaceWith: "\n    allowFrom:\n      - { service: ${{ parameters.name }} }\n"
           # 3. A network: block with no allowFrom key at all -- add the key. The anchor stops
           #    at `network:` without taking the newline: the lookahead needs that newline
           #    left in place to recognise a key sitting on the very next line.
           - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
             find: '\n  network:(?![\s\S]*\n    allowFrom:)'
-            replaceWith: "\n  network:\n    allowFrom:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }"
+            replaceWith: "\n  network:\n    allowFrom:\n      - { service: ${{ parameters.name }} }"
           # 4. No network: block at all (lookahead) -- open one directly under spec:.
           - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
             find: '\nspec:(?![\s\S]*\n  network:)'
-            replaceWith: "\nspec:\n  network:\n    allowFrom:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }"
+            replaceWith: "\nspec:\n  network:\n    allowFrom:\n      - { service: ${{ parameters.name }} }"
     - id: publish
       name: Open a PR with the new statefulbackend
       action: publish:github:pull-request
