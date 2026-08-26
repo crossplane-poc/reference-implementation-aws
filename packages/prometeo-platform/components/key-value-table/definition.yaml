@@ -1,0 +1,87 @@
+# KeyValueTable — one DynamoDB table, from tf-common-modules/dynamodb.
+#
+# On-demand by default, encrypted with its own KMS key, with per-service IAM grants. Native
+# equivalent: `KeyValueTable`, publishing the same connection ConfigMap keys.
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: keyvaluetables.platform.prometeo.iag.ai
+spec:
+  scope: Namespaced
+  group: platform.prometeo.iag.ai
+  names:
+    kind: KeyValueTable
+    plural: keyvaluetables
+    shortNames:
+      - kvtable
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [hashKey]
+              properties:
+                product:
+                  type: string
+                  description: Defaults to the XR's namespace.
+                modules:
+                  type: object
+                  properties:
+                    source:
+                      type: string
+                      default: git::ssh://git@github.com/IAGAI/tf-common-modules.git
+                    version:
+                      type: string
+                      default: v6.5.1
+                  default: {}
+                tableName:
+                  type: string
+                  description: Defaults to `prometeo-<env>-<product>-<name>`.
+                hashKey:
+                  type: string
+                  description: Partition key attribute name. Must appear in `attributes`.
+                rangeKey:
+                  type: string
+                  description: Sort key attribute name, if the table has one.
+                attributes:
+                  type: array
+                  description: >-
+                    Key attributes and their types — only the ones used by the keys and indexes,
+                    since DynamoDB is schemaless otherwise. Defaults to the hash key as a string.
+                  items:
+                    type: object
+                    required: [name, type]
+                    properties:
+                      name:
+                        type: string
+                      type:
+                        type: string
+                        enum: [S, N, B]
+                  default: []
+                billingMode:
+                  type: string
+                  enum: [PAY_PER_REQUEST, PROVISIONED]
+                  default: PAY_PER_REQUEST
+                ttlAttribute:
+                  type: string
+                  description: Attribute holding the expiry timestamp. Unset disables TTL.
+                access:
+                  type: array
+                  description: Services allowed to read and write the table, by name.
+                  items:
+                    type: string
+                  default: []
+            status:
+              type: object
+              properties:
+                workspace:
+                  type: string
+                tableName:
+                  type: string
+                tableArn:
+                  type: string

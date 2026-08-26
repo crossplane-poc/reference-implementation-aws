@@ -1,0 +1,194 @@
+# AppService — one service, from tf-common-modules/bootstrap-service.
+#
+# A namespace, an IRSA role, an OIDC deploy role, network policies, optionally an ingress on the
+# shared ALB and a CloudFront/Cognito gate in front of it. The workload itself is still deployed
+# by the service's own pipeline, exactly as in IMS — unlike the native `AppService`, which owns
+# the Deployment too.
+#
+# Terraform equivalent: one `module "<service>"` block in modules/products/<product>/{frontend,backend}.tf.
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: appservices.platform.prometeo.iag.ai
+spec:
+  scope: Namespaced
+  group: platform.prometeo.iag.ai
+  names:
+    kind: AppService
+    plural: appservices
+    shortNames:
+      - appsvc
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [repo]
+              properties:
+                product:
+                  type: string
+                  description: Product this service belongs to. Defaults to the XR's namespace.
+                productFamily:
+                  type: string
+                  default: ims
+                productTag:
+                  type: string
+                  description: Datadog cost-attribution tag. Defaults to the product name.
+                repo:
+                  type: string
+                  description: GitHub repository, for the OIDC deploy role.
+                modules:
+                  type: object
+                  properties:
+                    source:
+                      type: string
+                      default: git::ssh://git@github.com/IAGAI/tf-common-modules.git
+                    version:
+                      type: string
+                      default: v6.5.1
+                  default: {}
+                containerPort:
+                  type: integer
+                  default: 8000
+                productDeveloperRole:
+                  type: boolean
+                  description: >-
+                    Whether the product has a developer role to grant this service's policies to.
+                    Its path is `/<family>-<region>-products/<product>-<family>-developer`, which
+                    bootstrap-product names deterministically — so no lookup, but the
+                    Product must have applied first.
+                  default: true
+                ingress:
+                  type: object
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: false
+                    host:
+                      type: string
+                      description: Defaults to `<product>.<environment dnsDomain>`, the same name bootstrap-product publishes.
+                  default: {}
+                sso:
+                  type: object
+                  description: The CloudFront + Cognito gate. Requires ingress.enabled.
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: false
+                    cognitoDomain:
+                      type: string
+                      description: Defaults to the environment's cognito.domain.
+                    clientIdParameter:
+                      type: string
+                      description: >-
+                        SSM parameter holding this product's Cognito client id, read by the
+                        workspace itself — the Terraform-path equivalent of SsoEndpoint's
+                        spec.cognito.clientIdParameter. Defaults to
+                        /prometeo/<environment>/<product>/sso-client-id. When Cognito lives in
+                        another account the read assumes the environment's
+                        cognito.clientIdAssumeRoleArn. Ignored if clientIdSecretRef or clientId
+                        is set.
+                    parameterRegion:
+                      type: string
+                      description: Region of clientIdParameter. Defaults to the environment's region.
+                    clientId:
+                      type: string
+                      description: >-
+                        Escape hatch — a literal id, stored in plain text on the Workspace.
+                        Prefer clientIdParameter.
+                    clientIdSecretRef:
+                      type: object
+                      description: >-
+                        Escape hatch — read the id from a Secret in this namespace instead of
+                        SSM, for an environment with no cross-account read.
+                      required: [name, key]
+                      properties:
+                        name:
+                          type: string
+                        key:
+                          type: string
+                    productConnection:
+                      type: string
+                      description: >-
+                        ConfigMap in this namespace holding SSO_WEB_ACL_ARN — the
+                        `<name>-connection` a Product publishes. Required when enabled:
+                        a WebACL ARN contains a generated id, so unlike everything else here it
+                        cannot be derived from a name.
+                    hostedZoneId:
+                      type: string
+                      description: Defaults to the environment's dnsZoneId.
+                  default: {}
+                database:
+                  type: object
+                  properties:
+                    enabled:
+                      type: boolean
+                      description: >-
+                        Network policy to the database subnets and `rds-db:connect` (granted by
+                        the PostgresDatabase, which lists this service in its `access`).
+                      default: false
+                    connection:
+                      type: string
+                      description: >-
+                        ConfigMap holding DATABASE_HOST — the `<name>-connection` a
+                        PostgresDatabase publishes. Becomes DATABASE_HOST in the service's
+                        base-envs ConfigMap.
+                  default: {}
+                bedrock:
+                  type: boolean
+                  default: false
+                langfuse:
+                  type: boolean
+                  default: false
+                network:
+                  type: object
+                  properties:
+                    egressDomains:
+                      type: array
+                      items:
+                        type: string
+                      default: []
+                    allowTo:
+                      type: array
+                      description: Other services this one may call.
+                      items:
+                        type: object
+                        required: [service, port]
+                        properties:
+                          service:
+                            type: string
+                          port:
+                            type: integer
+                      default: []
+                    allowFrom:
+                      type: array
+                      description: Other services allowed to call this one.
+                      items:
+                        type: object
+                        required: [service, port]
+                        properties:
+                          service:
+                            type: string
+                          port:
+                            type: integer
+                      default: []
+                  default: {}
+                vpaMinAllowed:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  default: {}
+            status:
+              type: object
+              properties:
+                workspace:
+                  type: string
+                roleName:
+                  type: string
+                ssoDomain:
+                  type: string

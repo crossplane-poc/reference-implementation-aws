@@ -1,0 +1,144 @@
+# Product — the product-level scaffolding, from tf-common-modules/bootstrap-product.
+#
+# The first object a product creates on this path: its DNS, its developer IAM role and EKS
+# access entry, the shared SSO WebACL, and (optionally) its Airflow client. Services and
+# datastores are separate components that attach to it by convention, exactly as the native
+# catalog does.
+#
+# Terraform equivalent: the `module "product"` block in modules/products/<product>/bootstrap.tf.
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: products.platform.prometeo.iag.ai
+spec:
+  scope: Namespaced
+  group: platform.prometeo.iag.ai
+  names:
+    kind: Product
+    plural: products
+    shortNames:
+      - product
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                product:
+                  type: string
+                  description: >-
+                    Product name (`product_name`). Defaults to the XR's namespace, which is the
+                    product on this path — one namespace holds all of a product's XRs.
+                productFamily:
+                  type: string
+                  description: The family whose VPC and EKS cluster the modules look up by tag.
+                  default: ims
+                modules:
+                  type: object
+                  properties:
+                    source:
+                      type: string
+                      default: git::ssh://git@github.com/IAGAI/tf-common-modules.git
+                    version:
+                      type: string
+                      description: Tag every module call is pinned to. Bumping it re-plans on the next reconcile.
+                      default: v6.5.1
+                  default: {}
+                developerRole:
+                  type: object
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: true
+                    bedrock:
+                      type: boolean
+                      default: false
+                  default: {}
+                sso:
+                  type: object
+                  description: >-
+                    The Cognito client the product's SSO gates use. Also read by AppService.
+                    The id comes from SSM unless clientIdSecretRef or clientId overrides it — see
+                    clientIdParameter.
+                  properties:
+                    clientIdParameter:
+                      type: string
+                      description: >-
+                        SSM parameter holding this product's Cognito client id, read by the
+                        workspace itself — the Terraform-path equivalent of SsoEndpoint's
+                        spec.cognito.clientIdParameter. Defaults to
+                        /prometeo/<environment>/<product>/sso-client-id. When Cognito lives in
+                        another account the read assumes the environment's
+                        cognito.clientIdAssumeRoleArn. Ignored if clientIdSecretRef or clientId
+                        is set.
+                    parameterRegion:
+                      type: string
+                      description: Region of clientIdParameter. Defaults to the environment's region.
+                    clientId:
+                      type: string
+                      description: >-
+                        Escape hatch — a literal id, stored in plain text on the Workspace.
+                        Prefer clientIdParameter.
+                    clientIdSecretRef:
+                      type: object
+                      description: >-
+                        Escape hatch — read the id from a Secret in this namespace instead of
+                        SSM, for an environment with no cross-account read.
+                      required: [name, key]
+                      properties:
+                        name:
+                          type: string
+                        key:
+                          type: string
+                    cognitoDomain:
+                      type: string
+                      description: Defaults to the environment's cognito.domain.
+                  default: {}
+                airflow:
+                  type: object
+                  description: >-
+                    The product's Airflow client — an ETLs bucket and grants on the
+                    `airflow-<product>` role.
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: false
+                    githubRepos:
+                      type: array
+                      items:
+                        type: string
+                      default: []
+                    bedrockFromService:
+                      type: string
+                      description: >-
+                        Service whose Bedrock policy Airflow reuses. The policy is named
+                        `<service>-bedrock-access` by bootstrap-service, so this needs no
+                        lookup — but the AppService that creates it must exist first.
+                      default: ""
+                    database:
+                      type: boolean
+                      description: >-
+                        Grant Airflow IAM auth on the product's database
+                        (`<product>-rds-iam-auth`, created by PostgresDatabase).
+                      default: false
+                    databaseConnection:
+                      type: string
+                      description: >-
+                        ConfigMap in this namespace holding DATABASE_HOST — normally the
+                        `<name>-connection` a PostgresDatabase publishes. Passed to Terraform
+                        as TF_VAR_airflow_rds_endpoint.
+                  default: {}
+            status:
+              type: object
+              properties:
+                workspace:
+                  type: string
+                productDomain:
+                  type: string
+                developerRolePath:
+                  type: string

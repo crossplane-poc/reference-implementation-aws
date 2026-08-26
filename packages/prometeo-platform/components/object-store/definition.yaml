@@ -1,0 +1,76 @@
+# ObjectStore — one S3 bucket, from tf-common-modules/s3.
+#
+# Private, versioned, encrypted with its own KMS key, with per-service IAM grants. Native
+# equivalent: `ObjectStore`, and the connection ConfigMap keys are the same.
+#
+# Terraform equivalent: a `module "<name>_bucket"` block plus the product's bucket-access IAM
+# policy (e.g. modules/products/cms/s3.tf).
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: objectstores.platform.prometeo.iag.ai
+spec:
+  scope: Namespaced
+  group: platform.prometeo.iag.ai
+  names:
+    kind: ObjectStore
+    plural: objectstores
+    shortNames:
+      - objstore
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                product:
+                  type: string
+                  description: Defaults to the XR's namespace.
+                modules:
+                  type: object
+                  properties:
+                    source:
+                      type: string
+                      default: git::ssh://git@github.com/IAGAI/tf-common-modules.git
+                    version:
+                      type: string
+                      default: v6.5.1
+                  default: {}
+                bucketName:
+                  type: string
+                  description: >-
+                    Full bucket name. Defaults to `prometeo-<env>-<product>-<name>`; S3 names
+                    are globally unique, so set this if the default is taken.
+                expirationDays:
+                  type: integer
+                  description: Delete objects and non-current versions after this many days. Unset keeps them.
+                access:
+                  type: array
+                  description: >-
+                    Services allowed to use the bucket. The IAM role bootstrap-service creates
+                    is named after the service, so this is a name, not a reference.
+                  items:
+                    type: object
+                    required: [service]
+                    properties:
+                      service:
+                        type: string
+                      level:
+                        type: string
+                        enum: [ro, rw]
+                        default: rw
+                  default: []
+            status:
+              type: object
+              properties:
+                workspace:
+                  type: string
+                bucketName:
+                  type: string
+                bucketArn:
+                  type: string

@@ -1,0 +1,364 @@
+# The module HCL is inlined below; this file is the source of truth. It was originally
+# spliced together by a generator that is not part of this repository.
+# How a AppService is built.
+#
+#   tf.m.upbound.io/Workspace       one bootstrap-service call and its state
+#   ConfigMap <name>-connection     the service's IAM role name and, when SSO is on, its
+#                                   CloudFront domain
+#
+# Two values cannot be derived from a name and arrive as TF_VAR_* environment variables read
+# out of another component's ConfigMap: the database endpoint and the SSO WebACL ARN. Everything
+# else — the developer role path, the ingress host, the hosted zone — is a convention or an
+# environment fact, which is what keeps the components independent of each other.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: appservice.platform.prometeo.iag.ai
+  labels:
+    crossplane.io/xrd: appservices.platform.prometeo.iag.ai
+spec:
+  compositeTypeRef:
+    apiVersion: platform.prometeo.iag.ai/v1alpha1
+    kind: AppService
+  mode: Pipeline
+  pipeline:
+    - step: environment
+      functionRef:
+        name: function-environment-configs
+      input:
+        apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+        kind: Input
+        spec:
+          environmentConfigs:
+            - type: Reference
+              ref:
+                name: prometeo-environment
+
+    - step: workspace
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            {{- $name := $xr.metadata.name -}}
+            {{- $ns := $xr.metadata.namespace -}}
+            {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
+
+            {{- $product := default $ns $spec.product -}}
+            {{- $modules := $spec.modules -}}
+            {{- $sso := $spec.sso -}}
+            {{- $db := $spec.database -}}
+            {{- $net := $spec.network -}}
+            {{- $workspace := printf "prometeo-%s-%s" $env.environment $name -}}
+
+            {{- $vars := dict
+                  "environment" $env.environment
+                  "region" $env.region
+                  "product_family" $spec.productFamily
+                  "product_name" $product
+                  "product_tag" (default $product $spec.productTag)
+                  "service_name" $name
+                  "github_repo_name" $spec.repo
+                  "container_port" $spec.containerPort
+                  "has_developer_role" $spec.productDeveloperRole
+                  "ingress_deploy" $spec.ingress.enabled
+                  "ingress_host" (default (printf "%s.%s" $product $env.dnsDomain) $spec.ingress.host)
+                  "enable_sso" $sso.enabled
+                  "sso_cognito_domain" (default $env.cognito.domain $sso.cognitoDomain)
+                  "sso_hosted_zone_id" (default $env.dnsZoneId $sso.hostedZoneId)
+                  "sso_vpc_origin_id" (default "" $env.cloudfront.vpcOriginId)
+                  "database_enabled" $db.enabled
+                  "allow_bedrock" $spec.bedrock
+                  "enable_langfuse" $spec.langfuse
+                  "egress_domains" $net.egressDomains
+                  "egress_to" $net.allowTo
+                  "ingress_from" $net.allowFrom
+                  "vpa_min_allowed" $spec.vpaMinAllowed -}}
+
+            {{- /* Where the Cognito client id comes from, in precedence order: a Secret in
+                   this namespace, a literal on the XR, or — the normal case — the SSM parameter
+                   the SSO account publishes, read by the apply itself. */ -}}
+            {{- $clientIdRef := $sso.clientIdSecretRef -}}
+            {{- $clientIdParam := "" -}}
+            {{- if not $clientIdRef -}}
+            {{- $vars = set $vars "sso_client_id" (default "" $sso.clientId) -}}
+            {{- if and $sso.enabled (not $sso.clientId) -}}
+            {{- $clientIdParam = default (printf "/prometeo/%s/%s/sso-client-id" $env.environment $product) $sso.clientIdParameter -}}
+            {{- end -}}
+            {{- end -}}
+            {{- $clientIdRoleArn := "" -}}
+            {{- if $clientIdParam -}}
+            {{- $clientIdRoleArn = default "" $env.cognito.clientIdAssumeRoleArn -}}
+            {{- $vars = set $vars "sso_client_id_parameter" $clientIdParam -}}
+            {{- $vars = set $vars "sso_client_id_parameter_region" (default $env.region $sso.parameterRegion) -}}
+            {{- $vars = set $vars "sso_client_id_assume_role_arn" $clientIdRoleArn -}}
+            {{- end -}}
+
+            {{- $envVars := list -}}
+            {{- if $clientIdRef -}}
+            {{- $envVars = append $envVars (dict "name" "TF_VAR_sso_client_id" "secretKeyRef" (dict "name" $clientIdRef.name "key" $clientIdRef.key)) -}}
+            {{- end -}}
+            {{- if and $sso.enabled $sso.productConnection -}}
+            {{- $envVars = append $envVars (dict "name" "TF_VAR_sso_web_acl_arn" "configMapKeyRef" (dict "name" $sso.productConnection "key" "SSO_WEB_ACL_ARN")) -}}
+            {{- end -}}
+            {{- if and $db.enabled $db.connection -}}
+            {{- $envVars = append $envVars (dict "name" "TF_VAR_database_host" "configMapKeyRef" (dict "name" $db.connection "key" "DATABASE_HOST")) -}}
+            {{- end }}
+            ---
+            apiVersion: tf.m.upbound.io/v1beta1
+            kind: Workspace
+            metadata:
+              name: {{ $name }}
+              namespace: {{ $ns }}
+              annotations:
+                {{ setResourceNameAnnotation "workspace" }}
+                crossplane.io/external-name: {{ $workspace | quote }}
+            spec:
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: terraform
+              writeConnectionSecretToRef:
+                name: {{ $name }}-outputs
+              forProvider:
+                source: Inline
+                inlineFormat: HCL
+                enableTerraformCLILogging: true
+                varmap: {{ $vars | toJson }}
+                {{- if $envVars }}
+                env: {{ $envVars | toJson }}
+                {{- end }}
+                module: |
+                  locals {
+                    # A Cognito public client id is not a secret — the parameter is a plain String — but the data
+                    # source marks every value sensitive, and a sensitive value cannot reach the module's
+                    # templatefile() calls.
+                    sso_client_id = (
+                      var.sso_client_id_parameter != ""
+                      ? nonsensitive(data.aws_ssm_parameter.sso_client_id[0].value)
+                      : var.sso_client_id
+                    )
+
+                    # bootstrap-product puts the developer role at a path it derives from the same three values,
+                    # so this needs no state sharing — the same trick the native components use for
+                    # `prometeo-<env>-<service>`.
+                    developer_role_path = var.has_developer_role ? (
+                      "/${var.product_family}-${var.region}-products/${var.product_name}-${var.product_family}-developer"
+                    ) : null
+
+                    sso_inputs = {
+                      cognito_domain = var.enable_sso && var.sso_cognito_domain != "" ? var.sso_cognito_domain : null
+                      client_id      = var.enable_sso && local.sso_client_id != "" ? local.sso_client_id : null
+                      hosted_zone_id = var.enable_sso && var.sso_hosted_zone_id != "" ? var.sso_hosted_zone_id : null
+                      vpc_origin_id  = var.enable_sso && var.sso_vpc_origin_id != "" ? var.sso_vpc_origin_id : null
+                      web_acl_arn    = var.enable_sso && var.sso_web_acl_arn != "" ? var.sso_web_acl_arn : null
+                    }
+                  }
+
+                  module "service" {
+                    source = "{{ $modules.source }}//modules/bootstrap-service?ref={{ $modules.version }}"
+
+                    providers = {
+                      aws           = aws
+                      aws.us_east_1 = aws.us_east_1
+                    }
+
+                    service_name     = var.service_name
+                    github_repo_name = var.github_repo_name
+                    product_family   = var.product_family
+                    product_name     = var.product_name
+                    product_tag      = var.product_tag
+                    environment      = var.environment
+
+                    product_developer_role_path = local.developer_role_path
+
+                    container_port = var.container_port
+                    ingress_deploy = var.ingress_deploy
+                    ingress_host   = var.ingress_deploy ? var.ingress_host : null
+
+                    custom_egress_rules        = var.egress_to
+                    custom_ingress_rules       = var.ingress_from
+                    egress_whitelisted_domains = var.egress_domains
+
+                    database_host         = var.database_host != "" ? var.database_host : null
+                    add_rds_networkpolicy = var.database_enabled
+
+                    allow_bedrock   = var.allow_bedrock
+                    enable_langfuse = var.enable_langfuse
+                    vpa_min_allowed = var.vpa_min_allowed
+
+                    # Empty is passed through as null so bootstrap-service's own validation names the missing
+                    # input, rather than CloudFront failing later on an empty WebACL association.
+                    enable_sso         = var.enable_sso
+                    sso_cognito_domain = local.sso_inputs.cognito_domain
+                    sso_client_id      = local.sso_inputs.client_id
+                    sso_hosted_zone_id = local.sso_inputs.hosted_zone_id
+                    sso_vpc_origin_id  = local.sso_inputs.vpc_origin_id
+                    sso_web_acl_arn    = local.sso_inputs.web_acl_arn
+                  }
+
+                  output "service_role_name" {
+                    value = module.service.service_role_name
+                  }
+
+                  output "sso_cloudfront_domain" {
+                    value = module.service.sso_cloudfront_distribution_domain_name
+                  }
+
+                  output "bedrock_policy_arn" {
+                    value = module.service.bedrock_policy_arn
+                  }
+
+                  # Reading the Cognito client id out of SSM, in the account that owns Cognito.
+                  #
+                  # This used to be a Go-template conditional around the whole file, which is why the module could
+                  # not be checked by anything that understands Terraform. The gate is now the ordinary one: the
+                  # data source counts itself out when no parameter is named, and the provider only assumes a role
+                  # when an ARN is given.
+
+                  # Cognito is in another account, so this alias assumes the reader role that account publishes.
+                  # With no ARN it is this account, possibly another region.
+                  provider "aws" {
+                    alias  = "sso_client_id"
+                    region = var.sso_client_id_parameter_region != "" ? var.sso_client_id_parameter_region : var.region
+
+                    # The provider validates its credentials with sts:GetCallerIdentity before the first read.
+                    # Inside the VPC that call goes through the STS interface endpoint, whose policy only allows
+                    # principals of the workload account, so for the cross-account reader role it fails with "no
+                    # VPC endpoint policy allows the sts:GetCallerIdentity action". Nothing here needs the caller
+                    # identity — only one ssm:GetParameter, which the SSM endpoint policy does allow for that role.
+                    skip_credentials_validation = true
+                    skip_requesting_account_id  = true
+
+                    dynamic "assume_role" {
+                      for_each = var.sso_client_id_assume_role_arn != "" ? [var.sso_client_id_assume_role_arn] : []
+
+                      content {
+                        role_arn     = assume_role.value
+                        session_name = "prometeo-${var.environment}-${var.service_name}-sso"
+                      }
+                    }
+                  }
+
+                  data "aws_ssm_parameter" "sso_client_id" {
+                    count = var.sso_client_id_parameter != "" ? 1 : 0
+
+                    provider = aws.sso_client_id
+                    name     = var.sso_client_id_parameter
+                  }
+
+                  # One service from tf-common-modules/bootstrap-service: namespace, IRSA role, base envs,
+                  # NetworkPolicies, Ingress and — when spec.sso.enabled — the CloudFront gate.
+                  #
+                  # The `?ref=` in main.tf is rewritten from the XR's spec.modules when these files are spliced
+                  # into the composition (scripts/build.py); the literal is the default pin the tests run against.
+
+                  variable "environment" { type = string }
+                  variable "region" { type = string }
+                  variable "product_family" { type = string }
+                  variable "product_name" { type = string }
+                  variable "product_tag" { type = string }
+                  variable "service_name" { type = string }
+                  variable "github_repo_name" { type = string }
+                  variable "container_port" { type = number }
+                  variable "has_developer_role" { type = bool }
+                  variable "ingress_deploy" { type = bool }
+                  variable "ingress_host" { type = string }
+                  variable "enable_sso" { type = bool }
+                  variable "sso_cognito_domain" { type = string }
+                  variable "sso_hosted_zone_id" { type = string }
+                  variable "sso_vpc_origin_id" { type = string }
+                  variable "database_enabled" { type = bool }
+                  variable "allow_bedrock" { type = bool }
+                  variable "enable_langfuse" { type = bool }
+                  variable "egress_domains" { type = list(string) }
+                  variable "vpa_min_allowed" { type = map(string) }
+
+                  variable "egress_to" {
+                    type = list(object({ service = string, port = number }))
+                  }
+
+                  variable "ingress_from" {
+                    type = list(object({ service = string, port = number }))
+                  }
+
+                  # Injected from another component's ConfigMap when the spec names one.
+                  variable "database_host" {
+                    type    = string
+                    default = ""
+                  }
+
+                  variable "sso_web_acl_arn" {
+                    type    = string
+                    default = ""
+                  }
+
+                  # The client id reaches this workspace one of two ways: spec.sso.clientId (or a Secret) arrives
+                  # as a plain value here, or spec.sso.clientIdParameter names an SSM parameter that the apply
+                  # itself reads — see sso-client-id.tf. Exactly one of the two is ever non-empty.
+                  variable "sso_client_id" {
+                    type    = string
+                    default = ""
+                  }
+
+                  variable "sso_client_id_parameter" {
+                    type    = string
+                    default = ""
+                  }
+
+                  variable "sso_client_id_parameter_region" {
+                    type    = string
+                    default = ""
+                  }
+
+                  variable "sso_client_id_assume_role_arn" {
+                    type    = string
+                    default = ""
+                  }
+    - step: connection
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $name := $xr.metadata.name -}}
+            {{- $ns := $xr.metadata.namespace -}}
+            {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
+
+            {{- $workspace := printf "prometeo-%s-%s" $env.environment $name -}}
+            {{- $observed := default dict .observed.resources -}}
+            {{- $out := dig "status" "atProvider" "outputs" dict (dig "workspace" "resource" dict $observed) -}}
+
+            {{- $role := dig "service_role_name" "" $out -}}
+            {{- $ssoDomain := dig "sso_cloudfront_domain" "" $out }}
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: {{ $name }}-connection
+              namespace: {{ $ns }}
+              annotations:
+                {{ setResourceNameAnnotation "connection" }}
+                gotemplating.fn.crossplane.io/ready: "True"
+            data:
+              SERVICE_ROLE_NAME: {{ $role | quote }}
+              SSO_CLOUDFRONT_DOMAIN: {{ $ssoDomain | quote }}
+            ---
+            apiVersion: platform.prometeo.iag.ai/v1alpha1
+            kind: AppService
+            status:
+              workspace: {{ $workspace | quote }}
+              roleName: {{ $role | quote }}
+              ssoDomain: {{ $ssoDomain | quote }}
+
+    - step: ready
+      functionRef:
+        name: function-auto-ready

@@ -1,0 +1,27 @@
+# Runtime settings shared by every composition function pod.
+#
+# Functions run as pods with no resource requests by default. On a node that also runs the
+# memory-hungry provider pods the kernel can starve them of CPU: a render that takes ~20ms
+# takes 30-120s and blows the Crossplane<->function gRPC deadline, leaving XRs stuck at
+# SYNCED=False while every resource underneath is healthy. Requests fix that.
+#
+# Apply this BEFORE 11-functions.yaml — the Functions reference it by name.
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: function-resources
+spec:
+  deploymentTemplate:
+    spec:
+      selector: {}
+      template:
+        spec:
+          containers:
+            - name: package-runtime
+              resources:
+                requests:
+                  cpu: 250m
+                  memory: 256Mi
+                limits:
+                  cpu: "1"
+                  memory: 512Mi

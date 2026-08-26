@@ -1,0 +1,41 @@
+# Composition functions — the programs that turn an XR into resources.
+#
+# Crossplane v2 has no "native" composition: every Composition runs a pipeline of functions.
+# Prometeo uses exactly three, in this order, in every component:
+#
+#   1. function-environment-configs  loads the environment's EnvironmentConfig (account id,
+#                                    region, cluster facts, defaults) into the pipeline
+#                                    context under "apiextensions.crossplane.io/environment".
+#   2. function-go-templating        renders the resources from a template.
+#   3. function-auto-ready           marks the XR Ready once its resources are Ready.
+#
+# Versions are pinned. Check for newer releases at:
+#   https://github.com/crossplane-contrib/function-environment-configs/releases
+#   https://github.com/crossplane-contrib/function-go-templating/releases
+#   https://github.com/crossplane-contrib/function-auto-ready/releases
+apiVersion: pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: function-environment-configs
+spec:
+  package: xpkg.crossplane.io/crossplane-contrib/function-environment-configs:v0.7.3
+  runtimeConfigRef:
+    name: function-resources
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: function-go-templating
+spec:
+  package: xpkg.crossplane.io/crossplane-contrib/function-go-templating:v0.12.3
+  runtimeConfigRef:
+    name: function-resources
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: function-auto-ready
+spec:
+  package: xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.7.0
+  runtimeConfigRef:
+    name: function-resources

@@ -1,0 +1,14 @@
+# provider-terraform declares the SafeStart capability too, so its CRD is not installed until
+# something activates it — exactly like the AWS providers (see
+# ../../../../platform/bootstrap/config/30-activate-resources.yaml, which this sits alongside
+# rather than replaces; activation policies are additive).
+#
+# Without this, every TerraformProduct fails with:
+#   no matches for kind "Workspace" in version "tf.m.upbound.io/v1beta1"
+apiVersion: apiextensions.crossplane.io/v1alpha1
+kind: ManagedResourceActivationPolicy
+metadata:
+  name: prometeo-terraform
+spec:
+  activate:
+    - workspaces.tf.m.upbound.io

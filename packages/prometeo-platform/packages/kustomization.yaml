@@ -1,0 +1,11 @@
+# Wave -20: the Crossplane packages. Nothing else here can apply until their CRDs exist.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+commonAnnotations:
+  argocd.argoproj.io/sync-wave: "-20"
+
+resources:
+  - 10-function-runtime.yaml
+  - 11-functions.yaml
+  - 22-provider-terraform.yaml

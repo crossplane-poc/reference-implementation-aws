@@ -1,0 +1,28 @@
+# What the Terraform provider pod may do inside this cluster.
+#
+# The modules under tf-common-modules do not only create AWS resources: bootstrap-product and
+# bootstrap-service create namespaces, service accounts, network policies, ingresses, config
+# maps, RBAC objects and CRs through the kubernetes/kubectl/helm providers. In IMS that runs
+# from GitHub Actions as a role with cluster-admin on the EKS cluster.
+#
+# This binding is the same privilege, moved inside the cluster — and it is the single biggest
+# difference between the two paths in this repo. The native components compose a fixed,
+# reviewable set of kinds and Crossplane's RBAC is scoped to exactly those
+# (31-rbac-native-resources.yaml). Here, whatever the module version says gets created, with
+# cluster-admin behind it. Anyone who can write a TerraformProduct — or bump moduleVersion —
+# has cluster-admin by proxy.
+#
+# Acceptable for a PoC in sb3. Before this goes anywhere near a shared cluster, replace it with
+# a ClusterRole scoped to the kinds the modules actually create, and gate who may apply the XR.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometeo-terraform-provider
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: provider-terraform
+    namespace: crossplane-system

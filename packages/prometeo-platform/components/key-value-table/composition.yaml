@@ -1,0 +1,234 @@
+# The module HCL is inlined below; this file is the source of truth. It was originally
+# spliced together by a generator that is not part of this repository.
+# How a KeyValueTable is built.
+#
+#   tf.m.upbound.io/Workspace       one dynamodb module call, plus one IAM policy and
+#                                   attachment per grantee
+#   ConfigMap <name>-connection     DYNAMODB_TABLE_NAME / _ARN, as the native KeyValueTable
+#
+# The module's `kms_key_users` takes principal ARNs, so the grantee roles are named there as
+# well as in the table policy — without it a grantee can call DynamoDB but not decrypt.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: keyvaluetable.platform.prometeo.iag.ai
+  labels:
+    crossplane.io/xrd: keyvaluetables.platform.prometeo.iag.ai
+spec:
+  compositeTypeRef:
+    apiVersion: platform.prometeo.iag.ai/v1alpha1
+    kind: KeyValueTable
+  mode: Pipeline
+  pipeline:
+    - step: environment
+      functionRef:
+        name: function-environment-configs
+      input:
+        apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+        kind: Input
+        spec:
+          environmentConfigs:
+            - type: Reference
+              ref:
+                name: prometeo-environment
+
+    - step: workspace
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            {{- $name := $xr.metadata.name -}}
+            {{- $ns := $xr.metadata.namespace -}}
+            {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
+
+            {{- $product := default $ns $spec.product -}}
+            {{- $modules := $spec.modules -}}
+            {{- $table := default (printf "prometeo-%s-%s-%s" $env.environment $product $name) $spec.tableName -}}
+            {{- $workspace := printf "prometeo-%s-%s-%s" $env.environment $product $name -}}
+
+            {{- $attributes := $spec.attributes -}}
+            {{- if not $attributes -}}
+            {{- $attributes = list (dict "name" $spec.hashKey "type" "S") -}}
+            {{- end -}}
+
+            {{- $vars := dict
+                  "account_id" $env.accountId
+                  "table_name" $table
+                  "hash_key" $spec.hashKey
+                  "range_key" (default "" $spec.rangeKey)
+                  "attributes" $attributes
+                  "billing_mode" $spec.billingMode
+                  "ttl_attribute" (default "" $spec.ttlAttribute)
+                  "access" $spec.access
+                  "tags" (merge (dict "Name" $table "Product" $product "Component" $name) $env.tags) }}
+            ---
+            apiVersion: tf.m.upbound.io/v1beta1
+            kind: Workspace
+            metadata:
+              name: {{ $name }}
+              namespace: {{ $ns }}
+              annotations:
+                {{ setResourceNameAnnotation "workspace" }}
+                crossplane.io/external-name: {{ $workspace | quote }}
+            spec:
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: terraform
+              writeConnectionSecretToRef:
+                name: {{ $name }}-outputs
+              forProvider:
+                source: Inline
+                inlineFormat: HCL
+                enableTerraformCLILogging: true
+                varmap: {{ $vars | toJson }}
+                module: |
+                  locals {
+                    role_arns = [for s in var.access : "arn:aws:iam::${var.account_id}:role/${s}"]
+                  }
+
+                  module "table" {
+                    source = "{{ $modules.source }}//modules/dynamodb?ref={{ $modules.version }}"
+
+                    table_name         = var.table_name
+                    hash_key           = var.hash_key
+                    range_key          = var.range_key != "" ? var.range_key : null
+                    attributes         = var.attributes
+                    billing_mode       = var.billing_mode
+                    ttl_enabled        = var.ttl_attribute != ""
+                    ttl_attribute_name = var.ttl_attribute
+                    kms_key_users      = local.role_arns
+                    tags               = var.tags
+                  }
+
+                  resource "aws_iam_policy" "access" {
+                    for_each = toset(var.access)
+
+                    name        = "${var.table_name}-${each.key}"
+                    description = "Read/write access to ${var.table_name} for ${each.key}"
+
+                    policy = jsonencode({
+                      Version = "2012-10-17"
+                      Statement = [
+                        {
+                          Sid    = "TableActions"
+                          Effect = "Allow"
+                          Action = [
+                            "dynamodb:GetItem",
+                            "dynamodb:PutItem",
+                            "dynamodb:UpdateItem",
+                            "dynamodb:DeleteItem",
+                            "dynamodb:BatchGetItem",
+                            "dynamodb:BatchWriteItem",
+                            "dynamodb:Query",
+                            "dynamodb:Scan",
+                            "dynamodb:DescribeTable",
+                          ]
+                          Resource = [module.table.table_arn, "${module.table.table_arn}/index/*"]
+                        },
+                        {
+                          Sid      = "UseTheTableKey"
+                          Effect   = "Allow"
+                          Action   = ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
+                          Resource = [module.table.kms_key_arn]
+                        },
+                      ]
+                    })
+                  }
+
+                  resource "aws_iam_role_policy_attachment" "access" {
+                    for_each = toset(var.access)
+
+                    role       = each.key
+                    policy_arn = aws_iam_policy.access[each.key].arn
+                  }
+
+                  output "table_name" {
+                    value = module.table.table_name
+                  }
+
+                  output "table_arn" {
+                    value = module.table.table_arn
+                  }
+
+                  # One DynamoDB table from tf-common-modules/dynamodb, plus one IAM policy per service in
+                  # spec.access.
+                  #
+                  # The `?ref=` in main.tf is rewritten from the XR's spec.modules when these files are spliced
+                  # into the composition (scripts/build.py); the literal is the default pin the tests run against.
+                  variable "account_id" { type = string }
+
+                  variable "table_name" { type = string }
+
+                  variable "hash_key" { type = string }
+
+                  variable "range_key" { type = string }
+
+                  variable "billing_mode" { type = string }
+
+                  variable "ttl_attribute" { type = string }
+
+                  variable "access" { type = list(string) }
+
+                  variable "tags" { type = map(string) }
+
+                  variable "attributes" {
+                    type = list(object({ name = string, type = string }))
+                  }
+    - step: connection
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            {{- $name := $xr.metadata.name -}}
+            {{- $ns := $xr.metadata.namespace -}}
+            {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
+
+            {{- $product := default $ns $spec.product -}}
+            {{- $workspace := printf "prometeo-%s-%s-%s" $env.environment $product $name -}}
+            {{- $observed := default dict .observed.resources -}}
+            {{- $out := dig "status" "atProvider" "outputs" dict (dig "workspace" "resource" dict $observed) -}}
+
+            {{- $table := dig "table_name" "" $out -}}
+            {{- $arn := dig "table_arn" "" $out -}}
+            {{- $granteeCsv := join "," $spec.access }}
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: {{ $name }}-connection
+              namespace: {{ $ns }}
+              annotations:
+                {{ setResourceNameAnnotation "connection" }}
+                gotemplating.fn.crossplane.io/ready: "True"
+                {{- if $spec.access }}
+                reflector.v1.k8s.emberstack.com/reflection-allowed: "true"
+                reflector.v1.k8s.emberstack.com/reflection-allowed-namespaces: {{ $granteeCsv | quote }}
+                reflector.v1.k8s.emberstack.com/reflection-auto-enabled: "true"
+                reflector.v1.k8s.emberstack.com/reflection-auto-namespaces: {{ $granteeCsv | quote }}
+                {{- end }}
+            data:
+              DYNAMODB_TABLE_NAME: {{ $table | quote }}
+              DYNAMODB_TABLE_ARN: {{ $arn | quote }}
+            ---
+            apiVersion: platform.prometeo.iag.ai/v1alpha1
+            kind: KeyValueTable
+            status:
+              workspace: {{ $workspace | quote }}
+              tableName: {{ $table | quote }}
+              tableArn: {{ $arn | quote }}
+
+    - step: ready
+      functionRef:
+        name: function-auto-ready

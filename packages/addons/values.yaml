@@ -264,6 +264,17 @@ crossplane-compositions:
         operator: In
         values: ['control-plane']
 
+prometeo-platform:
+  enabled: true
+  namespace: crossplane-system
+  type: manifest
+  path: packages/prometeo-platform
+  selector:
+    matchExpressions:
+      - key: environment
+        operator: In
+        values: ['control-plane']
+
 syncPolicy:
   automated:
     selfHeal: true
