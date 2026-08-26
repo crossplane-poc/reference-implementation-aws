@@ -227,12 +227,23 @@ argo-workflows:
         operator: In
         values: ['control-plane']
 
+# v2, not 1.x. Every component in packages/prometeo-platform is a v2 API:
+# apiextensions.crossplane.io/v2 XRDs with scope: Namespaced, composing namespaced managed
+# resources (*.m.upbound.io). Crossplane 1.20 serves only apiextensions.crossplane.io/v1, so
+# those XRDs cannot even be applied:
+#
+#   The Kubernetes API could not find version "v2" of
+#   apiextensions.crossplane.io/CompositeResourceDefinition
+#
+# The cluster had v2 installed by hand and a sync of this Application put 1.20.0 back, which
+# replaced the XRD CRD with the v1-only definition and orphaned the ManagedResourceDefinition
+# and ManagedResourceActivationPolicy CRDs that only v2 ships.
 crossplane:
   enabled: true
   chartName: crossplane
   namespace: crossplane-system
   releaseName: crossplane
-  defaultVersion: "1.20.0"
+  defaultVersion: "2.4.0"
   chartRepository: "https://charts.crossplane.io/stable"
   selector:
     matchExpressions:
