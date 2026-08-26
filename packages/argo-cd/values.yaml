@@ -13,6 +13,18 @@ repoServer:
     requests:
       cpu: 200m
       memory: 256Mi
+  # The chart's default liveness probe hits /healthz?full=true with timeoutSeconds: 1. That
+  # endpoint does real work -- it exercises the repo cache rather than just answering -- and one
+  # second is not enough on a busy node: three timeouts in a row and the kubelet kills a pod that
+  # is perfectly healthy. It was restarting every few minutes, taking every Application to
+  # sync status Unknown with "Failed to load target state ... connection refused" each time.
+  livenessProbe:
+    timeoutSeconds: 10
+    periodSeconds: 20
+    failureThreshold: 5
+  readinessProbe:
+    timeoutSeconds: 5
+    failureThreshold: 5
 server:
   resources:
     requests:
