@@ -439,9 +439,9 @@ publicly documented in enough detail to cite responsibly. Better to say so than 
 flowchart TD
   subgraph src [Service repos]
     C[commit to main] --> B[build + scan]
-    B --> E[(ECR: image@digest)]
+    B --> E[("ECR: image@digest")]
   end
-  B --> PRD[PR: envs/dev/release.yaml]
+  B --> PRD["PR: envs/dev/release.yaml"]
   subgraph gitops [products repo]
     PRD --> DEV[envs/dev]
     DEV -->|promotion PR| TST[envs/tst]
