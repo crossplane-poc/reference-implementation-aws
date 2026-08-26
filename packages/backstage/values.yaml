@@ -97,6 +97,10 @@ backstage:
             prompt: auto
     scaffolder:
     catalog:
+      # Delete entities whose source stopped yielding them, rather than leaving them behind.
+      # The default is "keep", which is why the statefulbackend template stayed in the catalog
+      # and remained offered on /create after its file was removed from the repository.
+      orphanStrategy: delete
       import:
         entityFilename: catalog-info.yaml
         pullRequestBranchName: backstage-integration
