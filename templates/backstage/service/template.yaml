@@ -153,44 +153,28 @@ spec:
         allowFrom:
           title: Services allowed to call this one
           type: array
-          description: >-
-            No port to pick: they reach this service on its own container port, which is already
-            answered above.
+          description: They reach this service on its own container port, answered above.
           items:
-            type: object
-            required: [service]
-            properties:
-              service:
-                title: Service
-                type: string
-                ui:field: EntityPicker
-                ui:options:
-                  catalogFilter:
-                    kind: Component
-                  defaultKind: Component
+            type: string
+          ui:field: MultiEntityPicker
+          ui:options:
+            catalogFilter:
+              kind: Component
+            defaultKind: Component
           default: []
         allowTo:
           title: Services this one may call
           type: array
+          description: >-
+            No port to pick here either: each one is looked up in the catalog, which records the
+            port a service listens on.
           items:
-            type: object
-            required: [service, port]
-            properties:
-              service:
-                title: Service
-                type: string
-                ui:field: EntityPicker
-                ui:options:
-                  catalogFilter:
-                    kind: Component
-                  defaultKind: Component
-              port:
-                title: Port it listens on
-                type: integer
-                description: >-
-                  The other service's port, not this one's — so it has to be given. If that
-                  service is also yours, declaring the rule from its side instead ("services
-                  allowed to call this one") fills the port in by itself.
+            type: string
+          ui:field: MultiEntityPicker
+          ui:options:
+            catalogFilter:
+              kind: Component
+            defaultKind: Component
           default: []
         egressDomains:
           title: Public addresses it may reach
@@ -215,12 +199,48 @@ spec:
         url: https://github.com/crossplane-poc/prometeo-products/tree/main/products/${{ parameters.product | parseEntityRef | pick('name') }}
         targetPath: products/${{ parameters.product | parseEntityRef | pick('name') }}
 
+    # A service's outbound rules need the port each peer listens on, and the form cannot know
+    # it -- an EntityPicker hands back a reference, not the entity. The catalog does know: every
+    # service's Component entity carries iag.ai/container-port, written by this template. One
+    # query for the whole product, then a join, rather than a lookup per peer.
+    - id: fetch-peer-ports
+      name: Look up the ports the chosen services listen on
+      action: http:backstage:request
+      input:
+        method: GET
+        path: /api/catalog/entities/by-query?filter=kind=component,spec.system=${{ parameters.product | parseEntityRef | pick('name') }}&fields=metadata.name,metadata.annotations
+
+    - id: resolve-allow-to
+      name: Pair each chosen service with its port
+      action: roadiehq:utils:jsonata
+      input:
+        data:
+          picked: ${{ parameters.allowTo }}
+          catalog: ${{ steps['fetch-peer-ports'].output.body }}
+        # $$ is the root: inside picked.(...) the context is the reference string, so the
+        # catalog has to be reached from the top or every lookup silently misses and every
+        # port comes back as the fallback.
+        #
+        # 8000 is that fallback, for a service whose entity predates this annotation. It is a
+        # guess, and a wrong one for a frontend -- the pull request shows the port, so it can
+        # be corrected there.
+        expression: |
+          picked.(
+            $name := $split($, "/")[-1];
+            $ann := $$.catalog.items[metadata.name = $name].metadata.annotations.`iag.ai/container-port`;
+            {
+              "service": $name,
+              "port": $number($ann ? $ann : "8000")
+            }
+          )
+
     - id: write-component
       name: Write the service manifest
       action: roadiehq:utils:fs:write
       input:
         path: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ parameters.name }}.yaml
         content: |
+          {% set resolvedAllowTo = steps['resolve-allow-to'].output.result %}
           apiVersion: platform.prometeo.iag.ai/v1alpha1
           kind: AppService
           metadata:
@@ -252,18 +272,18 @@ spec:
               # Where the product publishes its SSO WebACL. Derived from the product.
               productConnection: ${{ ((parameters.product | parseEntityRef | pick('name')) + '-connection') | dump }}
           {% endif %}
-          {% if (parameters.allowFrom and parameters.allowFrom | length) or (parameters.allowTo and parameters.allowTo | length) or (parameters.egressDomains and parameters.egressDomains | length) %}
+          {% if (parameters.allowFrom and parameters.allowFrom | length) or (resolvedAllowTo and resolvedAllowTo | length) or (parameters.egressDomains and parameters.egressDomains | length) %}
             network:
           {% if parameters.allowFrom and parameters.allowFrom | length %}
               allowFrom:
           {% for r in parameters.allowFrom %}
-                - { service: ${{ r.service | parseEntityRef | pick('name') }}, port: ${{ parameters.containerPort }} }
+                - { service: ${{ r | parseEntityRef | pick('name') }}, port: ${{ parameters.containerPort }} }
           {% endfor %}
           {% endif %}
-          {% if parameters.allowTo and parameters.allowTo | length %}
+          {% if resolvedAllowTo and resolvedAllowTo | length %}
               allowTo:
-          {% for r in parameters.allowTo %}
-                - { service: ${{ r.service | parseEntityRef | pick('name') }}, port: ${{ r.port }} }
+          {% for r in resolvedAllowTo %}
+                - { service: ${{ r.service }}, port: ${{ r.port }} }
           {% endfor %}
           {% endif %}
           {% if parameters.egressDomains and parameters.egressDomains | length %}
@@ -288,6 +308,9 @@ spec:
             annotations:
               backstage.io/kubernetes-namespace: ${{ parameters.product | parseEntityRef | pick('name') }}
               iag.ai/repo: ${{ parameters.repo | dump }}
+              # Read back by this same template when another service picks this one under
+              # "services this one may call". Without it that lookup falls back to 8000.
+              iag.ai/container-port: ${{ parameters.containerPort | string | dump }}
           spec:
             type: service
             lifecycle: experimental
@@ -344,34 +367,34 @@ spec:
       action: roadiehq:utils:fs:replace
       input:
         files:
-          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
             find: '\n    allowTo:\n'
             replaceWith: "\n    allowTo:\n      - { service: ${{ parameters.name }}, port: ${{ parameters.containerPort }} }\n"
-          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
             find: '\n  network:(?![\s\S]*\n    allowTo:)'
             replaceWith: "\n  network:\n    allowTo:\n      - { service: ${{ parameters.name }}, port: ${{ parameters.containerPort }} }"
-          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
             find: '\nspec:(?![\s\S]*\n  network:)'
             replaceWith: "\nspec:\n  network:\n    allowTo:\n      - { service: ${{ parameters.name }}, port: ${{ parameters.containerPort }} }"
 
     - id: mirror-allow-to
       name: Open the other end of each outbound rule
-      each: ${{ parameters.allowTo }}
+      each: ${{ steps['resolve-allow-to'].output.result }}
       action: roadiehq:utils:fs:replace
       input:
         files:
-          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service }}.yaml
             matchRegex: true
             find: '\n    allowFrom:\n'
             replaceWith: "\n    allowFrom:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }\n"
-          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service }}.yaml
             matchRegex: true
             find: '\n  network:(?![\s\S]*\n    allowFrom:)'
             replaceWith: "\n  network:\n    allowFrom:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }"
-          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service }}.yaml
             matchRegex: true
             find: '\nspec:(?![\s\S]*\n  network:)'
             replaceWith: "\nspec:\n  network:\n    allowFrom:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }"
