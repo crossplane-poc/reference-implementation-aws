@@ -377,3 +377,21 @@ spec:
     links:
       - title: Open PR
         url: ${{ steps['publish'].output.remoteUrl }}
+    text:
+      # A text blob rather than a second link, because a link's url has minLength: 1 in the
+      # scaffolder's own schema — there is no way to render one only for a frontend. This says
+      # something useful either way.
+      - title: Where it will answer
+        content: |
+          {% if parameters.frontend %}
+          **https://${{ parameters.product | parseEntityRef | pick('name') }}.sb3.ims.iag.ai**
+
+          Live once the pull request is merged and the product is synced. The address belongs to
+          the product, so a second frontend in the same product needs `spec.ingress.host` set to
+          something else.
+          {% else %}
+          Reachable only from inside the cluster, at
+          `${{ parameters.name }}.${{ parameters.name }}.svc.cluster.local:${{ parameters.containerPort }}`.
+          Nothing outside the VPC can reach it. Re-run this template with "is this a frontend?"
+          ticked to publish it.
+          {% endif %}
