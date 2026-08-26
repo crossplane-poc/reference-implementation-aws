@@ -240,8 +240,17 @@ crossplane:
         operator: In
         values: ['control-plane']
 
+# The Upbound AWS providers are not installed. Every component in this platform is built on
+# provider-terraform (packages/prometeo-platform), which shells out to terraform and talks to AWS
+# itself -- nothing composes an *.aws.m.upbound.io managed resource any more.
+#
+# They were not free: eleven provider pods requesting 200m CPU and 384Mi each, 2.2 vCPU and 4.2Gi
+# in total, on a three-node cluster. One node sat at 98% CPU requests, which starved every
+# 1-second liveness probe on it -- ingress-nginx and the ArgoCD repo-server were both being killed
+# and restarted every few minutes, and each repo-server restart took every Application to sync
+# status Unknown.
 crossplane-upbound-providers:
-  enabled: true
+  enabled: false
   chartName: crossplane-aws-upbound
   namespace: crossplane-system
   releaseName: crossplane-upbound-providers
@@ -253,8 +262,10 @@ crossplane-upbound-providers:
         operator: In
         values: ['control-plane']
 
+# CNOE's own example catalog: one XObjectStorage XRD composing an s3.aws.upbound.io Bucket. It
+# has no provider to run on now and nothing uses it.
 crossplane-compositions:
-  enabled: true
+  enabled: false
   namespace: crossplane-system
   type: manifest
   path: packages/crossplane-compositions
