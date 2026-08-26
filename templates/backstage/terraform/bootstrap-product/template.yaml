@@ -91,8 +91,6 @@ spec:
           3. Human reviews plan and merges
           4. `terraform apply` (manual or separate workflow — not enabled in spike by default)
 
-          Crossplane manifests in `../base/` are unchanged and still deploy via ArgoCD.
-
     - id: publish
       name: Open a PR with Terraform bootstrap files
       action: publish:github:pull-request
