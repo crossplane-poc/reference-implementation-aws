@@ -18,7 +18,6 @@ spec:
       required:
         - name
         - product
-        - namespace
       properties:
         name:
           title: Database component name
@@ -35,13 +34,6 @@ spec:
             catalogFilter:
               kind: System
             defaultKind: System
-        namespace:
-          title: Namespace
-          type: string
-          description: >-
-            Shared by more than one service? Use "<product>-<name>" (e.g. "cms-db") and it'll be
-            created for you. Private to one service? Use that service's own namespace instead —
-            and prefer the "statefulbackend" template, which bundles this for you.
         databaseName:
           title: Database name inside the cluster
           type: string
@@ -105,16 +97,26 @@ spec:
       input:
         path: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ parameters.name }}.yaml
         content: |
-          # The Namespace object is repeated harmlessly if this database shares a namespace with
-          # another component already declaring it (kustomize/kubectl apply is idempotent on an
-          # identical object) — kept self-contained per file rather than centralized, since
-          # Backstage template runs are stateless and can't append to a shared namespaces.yaml.
+          # A standalone datastore always lives in its product's namespace — never in a
+          # service's. That is a constant, not a judgement call: it never has to move when a
+          # second consumer appears, and moving a namespaced XR means delete-and-recreate,
+          # which takes the AWS resource with it.
+          #
+          # Consumers therefore always read <name>-connection across a namespace boundary, so
+          # kubernetes-reflector must be installed — the datastore's composition annotates this
+          # ConfigMap for every service named in access. See prometeo DEPLOY.md 3.1.
+          #
+          # The Namespace object is repeated harmlessly by every datastore in this product (kubectl
+          # apply is idempotent on an identical object), and since it is only ever the product
+          # namespace, it can no longer collide with the richer Namespace a service template
+          # writes. Kept self-contained per file rather than centralized: Backstage template
+          # runs are stateless and can't append to a shared namespaces.yaml.
           apiVersion: v1
           kind: Namespace
           metadata:
-            name: ${{ parameters.namespace }}
+            name: ${{ parameters.product | parseEntityRef | pick('name') }}
             labels:
-              name: ${{ parameters.namespace }}
+              name: ${{ parameters.product | parseEntityRef | pick('name') }}
               product: ${{ parameters.product | parseEntityRef | pick('name') }}
               platform: prometeo
           ---
@@ -122,34 +124,34 @@ spec:
           kind: PostgresDatabase
           metadata:
             name: ${{ parameters.name }}
-            namespace: ${{ parameters.namespace }}
+            namespace: ${{ parameters.product | parseEntityRef | pick('name') }}
           spec:
             product: ${{ parameters.product | parseEntityRef | pick('name') }}
           {% if parameters.databaseName %}
-            databaseName: {{ parameters.databaseName | dump }}
+            databaseName: ${{ parameters.databaseName | dump }}
           {% endif %}
           {% if parameters.engineVersion %}
-            engineVersion: {{ parameters.engineVersion | dump }}
+            engineVersion: ${{ parameters.engineVersion | dump }}
           {% endif %}
           {% if parameters.schemas and parameters.schemas | length %}
             schemas:
           {% for s in parameters.schemas %}
-              - {{ s }}
+              - ${{ s }}
           {% endfor %}
           {% endif %}
             capacity:
               instances: ${{ parameters.instances }}
           {% if parameters.minACU %}
-              minACU: {{ parameters.minACU }}
+              minACU: ${{ parameters.minACU }}
           {% endif %}
           {% if parameters.maxACU %}
-              maxACU: {{ parameters.maxACU }}
+              maxACU: ${{ parameters.maxACU }}
           {% endif %}
           {% if parameters.access and parameters.access | length %}
             access:
           {% for a in parameters.access %}
-              - service: {{ a.service }}
-                level: {{ a.level }}
+              - service: ${{ a.service | parseEntityRef | pick('name') }}
+                level: ${{ a.level }}
           {% endfor %}
           {% endif %}
             backupRetentionDays: ${{ parameters.backupRetentionDays }}
@@ -167,7 +169,7 @@ spec:
             name: ${{ parameters.name }}
             description: ${{ ('PostgresDatabase ' + parameters.name + ' (product ' + (parameters.product | parseEntityRef | pick('name')) + ')') | dump }}
             annotations:
-              backstage.io/kubernetes-namespace: ${{ parameters.namespace }}
+              backstage.io/kubernetes-namespace: ${{ parameters.product | parseEntityRef | pick('name') }}
           spec:
             type: database
             lifecycle: experimental

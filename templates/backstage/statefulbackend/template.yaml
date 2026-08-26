@@ -144,6 +144,29 @@ spec:
           default: false
 
   steps:
+    # -----------------------------------------------------------------------------------
+    # Connectivity is two-ended, so the peer's manifest has to change too.
+    #
+    # A NetworkPolicy can only select pods in its own namespace, and every service IS its own
+    # namespace. So an `allowFrom` entry naming tief-fe renders this service's ingress rule and
+    # nothing else — tief-fe's egress rule can only be written into tief-fe's namespace, by
+    # tief-fe's own XR. On top of that, `allowTo` is what emits <PEER>_HOST into the caller's
+    # base envs (app-service composition, "One <PEER>_HOST per declared outbound dependency"),
+    # so the caller needs the entry for service discovery even where egress is already open.
+    #
+    # Both halves therefore live in the peer's file. These steps fetch the existing manifests
+    # and mirror each rule into its peer, so one form fills in opens the connection end to end
+    # and the PR shows both sides.
+    # -----------------------------------------------------------------------------------
+    - id: fetch-products
+      name: Fetch the existing manifests so peers can be patched
+      action: fetch:plain
+      input:
+        # Only this product: connectivity is scoped to the product, so a peer is always a
+        # sibling in the same directory.
+        url: https://github.com/crossplane-poc/prometeo-products/tree/main/products/${{ parameters.product | parseEntityRef | pick('name') }}
+        targetPath: products/${{ parameters.product | parseEntityRef | pick('name') }}
+
     - id: write-component
       name: Write the StatefulBackend manifest
       action: roadiehq:utils:fs:write
@@ -171,12 +194,12 @@ spec:
             image: ${{ parameters.image | dump }}
             containerPort: ${{ parameters.containerPort }}
           {% if parameters.replicas %}
-            replicas: {{ parameters.replicas }}
+            replicas: ${{ parameters.replicas }}
           {% endif %}
           {% if parameters.env and parameters.env | length %}
             env:
           {% for k, v in parameters.env %}
-              {{ k }}: {{ v | dump }}
+              ${{ k }}: ${{ v | dump }}
           {% endfor %}
           {% endif %}
             migrations:
@@ -191,38 +214,38 @@ spec:
           {% if parameters.allowFrom and parameters.allowFrom | length %}
               allowFrom:
           {% for r in parameters.allowFrom %}
-                - service: {{ r.service }}
-                  port: {{ r.port }}
+                - service: ${{ r.service | parseEntityRef | pick('name') }}
+                  port: ${{ r.port }}
           {% endfor %}
           {% endif %}
           {% if parameters.allowTo and parameters.allowTo | length %}
               allowTo:
           {% for r in parameters.allowTo %}
-                - service: {{ r.service }}
-                  port: {{ r.port }}
+                - service: ${{ r.service | parseEntityRef | pick('name') }}
+                  port: ${{ r.port }}
           {% endfor %}
           {% endif %}
           {% endif %}
             database:
           {% if parameters.databaseName %}
-              databaseName: {{ parameters.databaseName | dump }}
+              databaseName: ${{ parameters.databaseName | dump }}
           {% endif %}
           {% if parameters.engineVersion %}
-              engineVersion: {{ parameters.engineVersion | dump }}
+              engineVersion: ${{ parameters.engineVersion | dump }}
           {% endif %}
           {% if parameters.schemas and parameters.schemas | length %}
               schemas:
           {% for s in parameters.schemas %}
-                - {{ s }}
+                - ${{ s }}
           {% endfor %}
           {% endif %}
               capacity:
                 instances: ${{ parameters.instances }}
           {% if parameters.minACU %}
-                minACU: {{ parameters.minACU }}
+                minACU: ${{ parameters.minACU }}
           {% endif %}
           {% if parameters.maxACU %}
-                maxACU: {{ parameters.maxACU }}
+                maxACU: ${{ parameters.maxACU }}
           {% endif %}
               deletionProtection: ${{ parameters.deletionProtection }}
 
@@ -245,6 +268,73 @@ spec:
             owner: guests
             system: ${{ parameters.product | parseEntityRef | pick('name') }}
 
+    - id: mirror-allow-from
+      name: Mirror each "allow from" rule as the peer's allowTo
+      each: ${{ parameters.allowFrom }}
+      action: roadiehq:utils:fs:replace
+      input:
+        files:
+          # Four mutually exclusive anchors, applied in order: whichever shape the peer's
+          # file is in, exactly one of them can match. Each is a pure insertion, so the
+          # peer keeps its comments. The path is pinned to this product: a peer outside it
+          # is not a legal target. No match (a typo, or a peer not in this product) is a
+          # silent no-op, visible as a missing side in the PR diff.
+          # 1. The key is already a block list -- insert at its head.
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
+            matchRegex: true
+            find: '\n    allowTo:\n'
+            replaceWith: "\n    allowTo:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }\n"
+          # 2. The key is there but empty (`allowTo: []`, the XRD default) -- open a block list.
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
+            matchRegex: true
+            find: '\n    allowTo: \[\]\n'
+            replaceWith: "\n    allowTo:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }\n"
+          # 3. A network: block with no allowTo key at all -- add the key. The anchor stops
+          #    at `network:` without taking the newline: the lookahead needs that newline
+          #    left in place to recognise a key sitting on the very next line.
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
+            matchRegex: true
+            find: '\n  network:(?![\s\S]*\n    allowTo:)'
+            replaceWith: "\n  network:\n    allowTo:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }"
+          # 4. No network: block at all (lookahead) -- open one directly under spec:.
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
+            matchRegex: true
+            find: '\nspec:(?![\s\S]*\n  network:)'
+            replaceWith: "\nspec:\n  network:\n    allowTo:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }"
+
+    - id: mirror-allow-to
+      name: Mirror each "allow to" rule as the peer's allowFrom
+      each: ${{ parameters.allowTo }}
+      action: roadiehq:utils:fs:replace
+      input:
+        files:
+          # Four mutually exclusive anchors, applied in order: whichever shape the peer's
+          # file is in, exactly one of them can match. Each is a pure insertion, so the
+          # peer keeps its comments. The path is pinned to this product: a peer outside it
+          # is not a legal target. No match (a typo, or a peer not in this product) is a
+          # silent no-op, visible as a missing side in the PR diff.
+          # 1. The key is already a block list -- insert at its head.
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
+            matchRegex: true
+            find: '\n    allowFrom:\n'
+            replaceWith: "\n    allowFrom:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }\n"
+          # 2. The key is there but empty (`allowFrom: []`, the XRD default) -- open a block list.
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
+            matchRegex: true
+            find: '\n    allowFrom: \[\]\n'
+            replaceWith: "\n    allowFrom:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }\n"
+          # 3. A network: block with no allowFrom key at all -- add the key. The anchor stops
+          #    at `network:` without taking the newline: the lookahead needs that newline
+          #    left in place to recognise a key sitting on the very next line.
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
+            matchRegex: true
+            find: '\n  network:(?![\s\S]*\n    allowFrom:)'
+            replaceWith: "\n  network:\n    allowFrom:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }"
+          # 4. No network: block at all (lookahead) -- open one directly under spec:.
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
+            matchRegex: true
+            find: '\nspec:(?![\s\S]*\n  network:)'
+            replaceWith: "\nspec:\n  network:\n    allowFrom:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }"
     - id: publish
       name: Open a PR with the new statefulbackend
       action: publish:github:pull-request
@@ -255,6 +345,11 @@ spec:
         description: >-
           Adds `products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ parameters.name }}.yaml` (Namespace +
           StatefulBackend) and its Backstage Component entity, via the "statefulbackend" template.
+
+
+          Also edits each peer named in "allow from" / "allow to": connectivity needs a rule at
+          both ends, and the peer's rule can only be written in the peer's own manifest. Check
+          both sides of the diff — a peer outside this product is skipped silently.
 
   output:
     links:

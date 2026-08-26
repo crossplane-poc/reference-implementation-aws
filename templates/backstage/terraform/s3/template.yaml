@@ -60,13 +60,13 @@ spec:
           module "${{ parameters.name | replace('-', '_') }}" {
             source = "git::https://github.com/IAGAI/tf-common-modules.git//modules/s3?ref=main"
 
-            bucket_name = "{{ bucketName }}"
+            bucket_name = "${{ bucketName }}"
           {% if parameters.expirationDays %}
             lifecycle_expiration_days = ${{ parameters.expirationDays }}
           {% endif %}
 
             tags = {
-              product  = "{{ product }}"
+              product  = "${{ product }}"
               platform = "prometeo"
               managed  = "terraform-pr"
             }
@@ -88,7 +88,7 @@ spec:
             annotations:
               iag.ai/provisioning: terraform-pr
               iag.ai/terraform-path: products/${{ product }}/terraform/${{ parameters.name }}.tf
-              iag.ai/s3-bucket-name: {{ bucketName | dump }}
+              iag.ai/s3-bucket-name: ${{ bucketName | dump }}
           spec:
             type: s3-bucket
             lifecycle: experimental

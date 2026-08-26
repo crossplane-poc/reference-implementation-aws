@@ -17,7 +17,6 @@ spec:
       required:
         - name
         - product
-        - namespace
       properties:
         name:
           title: Bucket component name
@@ -34,12 +33,6 @@ spec:
             catalogFilter:
               kind: System
             defaultKind: System
-        namespace:
-          title: Namespace
-          type: string
-          description: >-
-            Granted to one service only? Use that service's own namespace. Shared by more than
-            one? Use "<product>-<name>" instead.
         bucketName:
           title: Bucket name
           type: string
@@ -79,15 +72,26 @@ spec:
       input:
         path: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ parameters.name }}.yaml
         content: |
-          # The Namespace object is repeated harmlessly if this bucket shares a namespace with
-          # another component already declaring it (kustomize/kubectl apply is idempotent on an
-          # identical object).
+          # A standalone datastore always lives in its product's namespace — never in a
+          # service's. That is a constant, not a judgement call: it never has to move when a
+          # second consumer appears, and moving a namespaced XR means delete-and-recreate,
+          # which takes the AWS resource with it.
+          #
+          # Consumers therefore always read <name>-connection across a namespace boundary, so
+          # kubernetes-reflector must be installed — the datastore's composition annotates this
+          # ConfigMap for every service named in access. See prometeo DEPLOY.md 3.1.
+          #
+          # The Namespace object is repeated harmlessly by every datastore in this product (kubectl
+          # apply is idempotent on an identical object), and since it is only ever the product
+          # namespace, it can no longer collide with the richer Namespace a service template
+          # writes. Kept self-contained per file rather than centralized: Backstage template
+          # runs are stateless and can't append to a shared namespaces.yaml.
           apiVersion: v1
           kind: Namespace
           metadata:
-            name: ${{ parameters.namespace }}
+            name: ${{ parameters.product | parseEntityRef | pick('name') }}
             labels:
-              name: ${{ parameters.namespace }}
+              name: ${{ parameters.product | parseEntityRef | pick('name') }}
               product: ${{ parameters.product | parseEntityRef | pick('name') }}
               platform: prometeo
           ---
@@ -95,11 +99,11 @@ spec:
           kind: ObjectStore
           metadata:
             name: ${{ parameters.name }}
-            namespace: ${{ parameters.namespace }}
+            namespace: ${{ parameters.product | parseEntityRef | pick('name') }}
           spec:
             product: ${{ parameters.product | parseEntityRef | pick('name') }}
           {% if parameters.bucketName %}
-            bucketName: {{ parameters.bucketName | dump }}
+            bucketName: ${{ parameters.bucketName | dump }}
           {% endif %}
           {% if parameters.expirationDays %}
             expirationDays: ${{ parameters.expirationDays }}
@@ -107,8 +111,8 @@ spec:
           {% if parameters.access and parameters.access | length %}
             access:
           {% for a in parameters.access %}
-              - service: {{ a.service }}
-                level: {{ a.level }}
+              - service: ${{ a.service | parseEntityRef | pick('name') }}
+                level: ${{ a.level }}
           {% endfor %}
           {% endif %}
 
@@ -124,7 +128,7 @@ spec:
             name: ${{ parameters.name }}
             description: ${{ ('ObjectStore ' + parameters.name + ' (product ' + (parameters.product | parseEntityRef | pick('name')) + ')') | dump }}
             annotations:
-              backstage.io/kubernetes-namespace: ${{ parameters.namespace }}
+              backstage.io/kubernetes-namespace: ${{ parameters.product | parseEntityRef | pick('name') }}
           spec:
             type: object-store
             lifecycle: experimental
