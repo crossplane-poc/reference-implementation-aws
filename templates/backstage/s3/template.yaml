@@ -12,7 +12,7 @@ spec:
   owner: guests
   type: resource
   parameters:
-    - title: Placement
+    - title: About the bucket
       required:
         - name
         - product
@@ -32,15 +32,7 @@ spec:
             catalogFilter:
               kind: System
             defaultKind: System
-        modulesVersion:
-          title: tf-common-modules version
-          type: string
-          default: ital-1901-add-sb3-environment
-          description: >-
-            Tag or branch this component is pinned to. Pinned per component so a module version
-            can be rolled forward one component at a time. No released tag accepts the sb3
-            environment yet, so this points at the ITAL-1901 branch.
-    - title: The bucket
+    - title: Behaviour and access
       properties:
         bucketName:
           title: Bucket name
@@ -92,7 +84,10 @@ spec:
           spec:
             product: ${{ parameters.product | parseEntityRef | pick('name') }}
             modules:
-              version: ${{ parameters.modulesVersion | dump }}
+              # Pinned by the platform, not by whoever fills in the form. No released tag accepts
+              # the sb3 environment yet: every tag up to v6.5.1 fails the plan with "environment
+              # must be one of: sb1, sb2, dev, tst, uat, prd".
+              version: ital-1901-add-sb3-environment
           {% if parameters.bucketName %}
             bucketName: ${{ parameters.bucketName | dump }}
           {% endif %}

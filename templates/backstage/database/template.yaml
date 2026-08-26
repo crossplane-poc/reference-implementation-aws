@@ -12,7 +12,7 @@ spec:
   owner: guests
   type: resource
   parameters:
-    - title: Placement
+    - title: About the database
       required:
         - name
         - product
@@ -32,14 +32,7 @@ spec:
             catalogFilter:
               kind: System
             defaultKind: System
-        modulesVersion:
-          title: tf-common-modules version
-          type: string
-          default: ital-1901-add-sb3-environment
-          description: >-
-            Tag or branch this component is pinned to. No released tag accepts the sb3 environment
-            yet, so this points at the ITAL-1901 branch.
-    - title: The cluster
+    - title: Size and version
       properties:
         databaseName:
           title: Database name
@@ -78,18 +71,6 @@ spec:
           description: >-
             Each entry grants that service's IAM role IAM auth on the database and mirrors this
             component's connection ConfigMap into its namespace.
-        k8sAccess:
-          title: Port-forward access
-          type: boolean
-          default: true
-          description: An HAProxy in a <product>-db-ops namespace, so a laptop can port-forward to the cluster.
-        bootstrapLambda:
-          title: Create the IAM-auth database users
-          type: boolean
-          default: true
-          description: >-
-            The Lambda that creates iam_user, iam_migration_user and admin_iam on first apply.
-            Without it an application authenticating with IAM has no role to log in as.
 
   steps:
     - id: write-component
@@ -106,7 +87,10 @@ spec:
           spec:
             product: ${{ parameters.product | parseEntityRef | pick('name') }}
             modules:
-              version: ${{ parameters.modulesVersion | dump }}
+              # Pinned by the platform, not by whoever fills in the form. No released tag accepts
+              # the sb3 environment yet: every tag up to v6.5.1 fails the plan with "environment
+              # must be one of: sb1, sb2, dev, tst, uat, prd".
+              version: ital-1901-add-sb3-environment
           {% if parameters.databaseName %}
             databaseName: ${{ parameters.databaseName | dump }}
           {% endif %}
@@ -126,8 +110,11 @@ spec:
               - ${{ a | parseEntityRef | pick('name') }}
           {% endfor %}
           {% endif %}
-            k8sAccess: ${{ parameters.k8sAccess }}
-            bootstrapLambda: ${{ parameters.bootstrapLambda }}
+            # Both on by every time: port-forward access from a laptop, and the Lambda that
+            # creates the IAM-auth users an application logs in as. Neither is a decision worth
+            # putting in front of whoever is creating a database.
+            k8sAccess: true
+            bootstrapLambda: true
 
     - id: write-catalog-info
       name: Write the Backstage Resource entity

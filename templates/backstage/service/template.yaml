@@ -4,16 +4,16 @@ metadata:
   name: service
   title: "Service"
   description: >-
-    One service in a product, built from tf-common-modules/modules/bootstrap-service by
-    Crossplane's Terraform provider: its namespace, IAM roles, deploy role, network policies and
-    optionally an ingress behind the shared ALB. Run the "product" template first.
+    A service in a product: its namespace, IAM roles, a deploy role for its repository, network
+    policies, and — for a frontend — a public address behind the shared ALB with SSO in front of
+    it. Run the "product" template first.
   tags:
     - prometeo
 spec:
   owner: guests
   type: service
   parameters:
-    - title: Placement
+    - title: About the service
       required:
         - name
         - product
@@ -22,13 +22,13 @@ spec:
         name:
           title: Service name
           type: string
-          description: e.g. "add-be". Becomes the XR name and the Kubernetes namespace Terraform creates for the pods.
+          description: e.g. "add-be". Becomes the name of the service and of the namespace its pods run in.
           pattern: '^[a-z][a-z0-9-]*$'
           ui:autofocus: true
         product:
           title: Product
           type: string
-          description: The product this service belongs to (run the "product" template first).
+          description: The product this service belongs to.
           ui:field: EntityPicker
           ui:options:
             catalogFilter:
@@ -38,75 +38,99 @@ spec:
           title: GitHub repository
           type: string
           description: >-
-            The application's own repository, e.g. "iag-mro-add-be". It gets an OIDC deploy role,
-            so this is how the app's pipeline is allowed to push images and roll the deployment.
+            The service's own repository, e.g. "iag-mro-add-be". It gets a deploy role, so this is
+            what lets the repository's pipeline push images and roll the deployment out.
+        frontend:
+          title: Is this a frontend?
+          type: boolean
+          default: false
+          description: >-
+            A frontend gets a public address on the shared ALB, with the SSO login gate in front
+            of it. Everything else is reachable only from inside the cluster.
         containerPort:
           title: Container port
           type: integer
           default: 8000
-          description: Backends typically use 8000/8001, frontends 3000.
-        modulesVersion:
-          title: tf-common-modules version
-          type: string
-          default: ital-1901-add-sb3-environment
-          description: >-
-            Tag or branch this component is pinned to. No released tag accepts the sb3 environment
-            yet, so this points at the ITAL-1901 branch.
+          description: The port the application listens on. Backends usually 8000, frontends 3000.
+    - title: What it connects to
+      properties:
+        needsDatabase:
+          title: Does it use a database?
+          type: boolean
+          default: false
+        needsBuckets:
+          title: Does it use any S3 buckets?
+          type: boolean
+          default: false
+      # Each picker only appears once its checkbox is ticked. One dependencies map holds both:
+      # a JSON Schema object can carry exactly one, and each key inside it is independent.
+      dependencies:
+        needsDatabase:
+          oneOf:
+            - properties:
+                needsDatabase:
+                  enum: [false]
+            - properties:
+                needsDatabase:
+                  enum: [true]
+                database:
+                  title: Database
+                  type: string
+                  description: >-
+                    Create it with the "database" template first, then pick it here. The service
+                    is granted access to it and gets its address automatically.
+                  ui:field: EntityPicker
+                  ui:options:
+                    catalogFilter:
+                      kind: Resource
+                      spec.type: database
+                    defaultKind: Resource
+              required:
+                - database
+        needsBuckets:
+          oneOf:
+            - properties:
+                needsBuckets:
+                  enum: [false]
+            - properties:
+                needsBuckets:
+                  enum: [true]
+                buckets:
+                  title: Buckets
+                  type: array
+                  description: >-
+                    Create them with the "s3" template first, then pick them here. Each bucket is
+                    updated to grant this service read/write access.
+                  items:
+                    type: string
+                  ui:field: MultiEntityPicker
+                  ui:options:
+                    catalogFilter:
+                      kind: Resource
+                      spec.type: object-store
+                    defaultKind: Resource
+                  default: []
+              required:
+                - buckets
     - title: AWS services
       properties:
         bedrock:
           title: Bedrock
           type: boolean
           default: false
+          description: Lets the service call the approved Bedrock models.
         langfuse:
           title: Langfuse
           type: boolean
           default: false
-        databaseEnabled:
-          title: Connect to the product's database
-          type: boolean
-          default: false
-          description: >-
-            Opens the network path to the database subnets and takes rds-db:connect, which the
-            PostgresDatabase grants by naming this service in its access list.
-        databaseConnection:
-          title: Database connection ConfigMap
-          type: string
-          description: >-
-            Only when the database is not this product's default — the <name>-connection ConfigMap
-            a PostgresDatabase publishes, e.g. "add-db-connection".
-    - title: Ingress
-      properties:
-        ingressEnabled:
-          title: Is this service an ingress?
-          type: boolean
-          default: false
-          description: >-
-            Yes publishes it on the shared ALB. The host defaults to <product>.<environment
-            domain>; edit the manifest in the PR to override it.
-        ssoEnabled:
-          title: Put it behind the SSO gate
-          type: boolean
-          default: false
-          description: >-
-            CloudFront plus Cognito in front of the ingress. The client id is read from SSM during
-            the apply, so there is nothing to set here.
-        ssoProductConnection:
-          title: Product connection ConfigMap
-          type: string
-          description: >-
-            Only with SSO — the ConfigMap holding SSO_WEB_ACL_ARN, which the Product publishes as
-            <product>-connection. The WebACL ARN contains a generated id, so unlike every other
-            cross-component value it cannot be derived from a name.
-    - title: Network
+    - title: Who it talks to
       description: >-
-        Everything is denied by default. Each entry opens one direction to one peer on one port,
-        and the peer's own manifest is edited in the same PR so both ends agree.
+        Everything is denied by default. Each entry opens one direction to one peer, and the
+        peer's own configuration is updated in the same change so both ends agree.
       properties:
         allowFrom:
-          title: Allow from
+          title: Services allowed to call this one
           type: array
-          description: Services allowed to call this one.
           items:
             type: object
             required: [service, port]
@@ -124,9 +148,8 @@ spec:
                 type: integer
           default: []
         allowTo:
-          title: Allow to
+          title: Services this one may call
           type: array
-          description: Services this one may call.
           items:
             type: object
             required: [service, port]
@@ -144,29 +167,30 @@ spec:
                 type: integer
           default: []
         egressDomains:
-          title: Public hostnames
+          title: Public addresses it may reach
           type: array
           items:
             type: string
           default: []
-          description: Hostnames this service may reach on 443, e.g. ["eu.i.posthog.com"].
+          description: Hostnames on the public internet, e.g. "eu.i.posthog.com".
 
   steps:
     # -----------------------------------------------------------------------------------
-    # Connectivity is two-ended, so the peer's manifest has to change too. An allowFrom entry
-    # naming add-fe opens this service's ingress; add-fe's matching egress can only be written
-    # into add-fe's own manifest. These steps fetch the product and mirror each rule into its
-    # peer, so one form fill-in opens the connection end to end and the PR shows both sides.
+    # Several of these steps edit components that already exist, because access is recorded on
+    # both sides. A bucket lists the services allowed to use it; a database lists the services
+    # granted a login; connectivity needs a rule at each end. The form asks the question once,
+    # from the side the developer is thinking about, and the change lands in every manifest it
+    # touches — so the pull request shows the whole picture.
     # -----------------------------------------------------------------------------------
     - id: fetch-product
-      name: Fetch the product so peers can be patched
+      name: Fetch the product so its components can be updated
       action: fetch:plain
       input:
         url: https://github.com/crossplane-poc/prometeo-products/tree/main/products/${{ parameters.product | parseEntityRef | pick('name') }}
         targetPath: products/${{ parameters.product | parseEntityRef | pick('name') }}
 
     - id: write-component
-      name: Write the AppService manifest
+      name: Write the service manifest
       action: roadiehq:utils:fs:write
       input:
         path: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ parameters.name }}.yaml
@@ -181,27 +205,26 @@ spec:
             repo: ${{ parameters.repo | dump }}
             containerPort: ${{ parameters.containerPort }}
             modules:
-              version: ${{ parameters.modulesVersion | dump }}
+              # Pinned by the platform, not by whoever fills in the form. No released tag accepts
+              # the sb3 environment yet: every tag up to v6.5.1 fails the plan with "environment
+              # must be one of: sb1, sb2, dev, tst, uat, prd".
+              version: ital-1901-add-sb3-environment
             bedrock: ${{ parameters.bedrock }}
             langfuse: ${{ parameters.langfuse }}
-          {% if parameters.databaseEnabled %}
+          {% if parameters.needsDatabase and parameters.database %}
             database:
               enabled: true
-          {% if parameters.databaseConnection %}
-              connection: ${{ parameters.databaseConnection | dump }}
+              # Where the database publishes its address. Derived from the component you picked.
+              connection: ${{ ((parameters.database | parseEntityRef | pick('name')) + '-connection') | dump }}
           {% endif %}
-          {% endif %}
-          {% if parameters.ingressEnabled %}
+          {% if parameters.frontend %}
             ingress:
               enabled: true
               # Host defaults to <product>.<environment domain>.
-          {% endif %}
-          {% if parameters.ssoEnabled %}
             sso:
               enabled: true
-          {% if parameters.ssoProductConnection %}
-              productConnection: ${{ parameters.ssoProductConnection | dump }}
-          {% endif %}
+              # Where the product publishes its SSO WebACL. Derived from the product.
+              productConnection: ${{ ((parameters.product | parseEntityRef | pick('name')) + '-connection') | dump }}
           {% endif %}
           {% if (parameters.allowFrom and parameters.allowFrom | length) or (parameters.allowTo and parameters.allowTo | length) or (parameters.egressDomains and parameters.egressDomains | length) %}
             network:
@@ -226,7 +249,7 @@ spec:
           {% endif %}
 
     - id: write-catalog-info
-      name: Write the Backstage Component entity
+      name: Write the catalog entry
       action: roadiehq:utils:fs:write
       input:
         path: products/${{ parameters.product | parseEntityRef | pick('name') }}/components/${{ parameters.name }}.yaml
@@ -235,7 +258,7 @@ spec:
           kind: Component
           metadata:
             name: ${{ parameters.name }}
-            description: ${{ ('AppService ' + parameters.name + ' (product ' + (parameters.product | parseEntityRef | pick('name')) + ')') | dump }}
+            description: ${{ ('Service ' + parameters.name + ' (product ' + (parameters.product | parseEntityRef | pick('name')) + ')') | dump }}
             annotations:
               backstage.io/kubernetes-namespace: ${{ parameters.product | parseEntityRef | pick('name') }}
               iag.ai/repo: ${{ parameters.repo | dump }}
@@ -244,26 +267,60 @@ spec:
             lifecycle: experimental
             owner: guests
             system: ${{ parameters.product | parseEntityRef | pick('name') }}
+          {% if (parameters.needsDatabase and parameters.database) or (parameters.needsBuckets and parameters.buckets and parameters.buckets | length) %}
+            dependsOn:
+          {% if parameters.needsDatabase and parameters.database %}
+              - ${{ ('resource:default/' + (parameters.database | parseEntityRef | pick('name'))) | dump }}
+          {% endif %}
+          {% for b in parameters.buckets %}
+              - ${{ ('resource:default/' + (b | parseEntityRef | pick('name'))) | dump }}
+          {% endfor %}
+          {% endif %}
+
+    # Grant this service access on each bucket it uses. Two anchors: the bucket already lists
+    # some services, or it lists none at all. fs:replace builds new RegExp(find, 'g') -- no /m,
+    # no /s -- so these match on explicit \n, and the second stops before the newline so its
+    # lookahead can still see whether an access key follows.
+    - id: grant-bucket-access
+      name: Grant this service access on each bucket
+      each: ${{ parameters.buckets if parameters.needsBuckets else [] }}
+      action: roadiehq:utils:fs:replace
+      input:
+        files:
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value | parseEntityRef | pick('name') }}.yaml
+            matchRegex: true
+            find: '\n  access:\n'
+            replaceWith: "\n  access:\n    - { service: ${{ parameters.name }}, level: rw }\n"
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value | parseEntityRef | pick('name') }}.yaml
+            matchRegex: true
+            find: '\nspec:(?![\s\S]*\n  access:)'
+            replaceWith: "\nspec:\n  access:\n    - { service: ${{ parameters.name }}, level: rw }"
+
+    # Same for the database, whose access list is service names rather than objects.
+    - id: grant-database-access
+      name: Grant this service a login on the database
+      each: ${{ [parameters.database] if (parameters.needsDatabase and parameters.database) else [] }}
+      action: roadiehq:utils:fs:replace
+      input:
+        files:
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value | parseEntityRef | pick('name') }}.yaml
+            matchRegex: true
+            find: '\n  access:\n'
+            replaceWith: "\n  access:\n    - ${{ parameters.name }}\n"
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value | parseEntityRef | pick('name') }}.yaml
+            matchRegex: true
+            find: '\nspec:(?![\s\S]*\n  access:)'
+            replaceWith: "\nspec:\n  access:\n    - ${{ parameters.name }}"
 
     - id: mirror-allow-from
-      name: Mirror each "allow from" rule as the peer's allowTo
+      name: Open the other end of each inbound rule
       each: ${{ parameters.allowFrom }}
       action: roadiehq:utils:fs:replace
       input:
         files:
-          # Four mutually exclusive anchors, applied in order: whichever shape the peer's file is
-          # in, exactly one can match. Each is a pure insertion, so the peer keeps its comments.
-          # A peer that is not in this product is a silent no-op, visible as a missing side in the
-          # PR diff. fs:replace builds new RegExp(find, 'g') -- no /m, no /s -- so these match on
-          # explicit \n. Anchors 3 and 4 stop before the newline on purpose: consuming it hides
-          # the separator the lookahead needs and makes two anchors fire.
           - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
             find: '\n    allowTo:\n'
-            replaceWith: "\n    allowTo:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }\n"
-          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
-            matchRegex: true
-            find: '\n    allowTo: \[\]\n'
             replaceWith: "\n    allowTo:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }\n"
           - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
@@ -275,7 +332,7 @@ spec:
             replaceWith: "\nspec:\n  network:\n    allowTo:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }"
 
     - id: mirror-allow-to
-      name: Mirror each "allow to" rule as the peer's allowFrom
+      name: Open the other end of each outbound rule
       each: ${{ parameters.allowTo }}
       action: roadiehq:utils:fs:replace
       input:
@@ -283,10 +340,6 @@ spec:
           - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
             find: '\n    allowFrom:\n'
-            replaceWith: "\n    allowFrom:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }\n"
-          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
-            matchRegex: true
-            find: '\n    allowFrom: \[\]\n'
             replaceWith: "\n    allowFrom:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }\n"
           - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
@@ -298,18 +351,16 @@ spec:
             replaceWith: "\nspec:\n  network:\n    allowFrom:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }"
 
     - id: publish
-      name: Open a PR with the new service
+      name: Open a pull request
       action: publish:github:pull-request
       input:
         repoUrl: github.com?repo=prometeo-products&owner=crossplane-poc
         branchName: scaffolder/service-${{ parameters.product | parseEntityRef | pick('name') }}-${{ parameters.name }}
         title: "prometeo service: ${{ parameters.product | parseEntityRef | pick('name') }}/${{ parameters.name }}"
         description: >-
-          Adds `products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ parameters.name }}.yaml`
-          (an AppService) and its Backstage Component entity. Also edits each peer named under
-          "allow from" / "allow to": connectivity needs a rule at both ends and the peer's rule
-          can only live in the peer's own manifest. Check both sides of the diff — a peer outside
-          this product is skipped silently.
+          Adds the ${{ parameters.name }} service. Also updates every component it was pointed at —
+          each bucket and database grants it access, and each service it talks to gets the matching
+          rule — because access is recorded at both ends. Check the whole diff.
 
   output:
     links:

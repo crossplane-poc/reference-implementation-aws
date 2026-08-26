@@ -13,7 +13,7 @@ spec:
   owner: guests
   type: system
   parameters:
-    - title: Placement
+    - title: About the product
       required:
         - name
       properties:
@@ -29,16 +29,7 @@ spec:
           title: Description
           type: string
           description: Shown on the System entity in the catalog.
-        modulesVersion:
-          title: tf-common-modules version
-          type: string
-          default: ital-1901-add-sb3-environment
-          description: >-
-            Tag or branch every module call in this product is pinned to. No released tag accepts
-            the sb3 environment yet — v6.5.1 and earlier fail the plan with "environment must be
-            one of: sb1, sb2, dev, tst, uat, prd" — so this points at the ITAL-1901 branch until
-            that merges and is tagged.
-    - title: What the product gets
+    - title: What it comes with
       properties:
         developerRole:
           title: Developer role
@@ -61,16 +52,6 @@ spec:
             type: string
           default: []
           description: Repositories allowed to deploy DAGs, e.g. ["iag-mro-add-data"].
-    - title: SSO
-      properties:
-        ssoClientId:
-          title: Cognito client id
-          type: string
-          description: >-
-            Leave blank in a normal environment: the apply reads the id from SSM at
-            /prometeo/<environment>/<product>/sso-client-id, through the environment's
-            cross-account reader role. Set a literal id only where that read is not possible —
-            it is stored in plain text on the Workspace.
 
   steps:
     - id: write-namespace
@@ -106,7 +87,10 @@ spec:
           spec:
             product: ${{ parameters.name }}
             modules:
-              version: ${{ parameters.modulesVersion | dump }}
+              # Pinned by the platform, not by whoever fills in the form. No released tag accepts
+              # the sb3 environment yet: every tag up to v6.5.1 fails the plan with "environment
+              # must be one of: sb1, sb2, dev, tst, uat, prd".
+              version: ital-1901-add-sb3-environment
             developerRole:
               enabled: ${{ parameters.developerRole }}
               bedrock: ${{ parameters.developerBedrock }}
@@ -120,14 +104,11 @@ spec:
           {% endfor %}
           {% endif %}
           {% endif %}
-          {% if parameters.ssoClientId %}
-            sso:
-              # A literal id, because this environment cannot read the SSM parameter.
-              clientId: ${{ parameters.ssoClientId | dump }}
-          {% else %}
-            # The Cognito client id is read from SSM during the apply — nothing to set here.
+            # The SSO login gate. Its Cognito client id is read from SSM during the apply,
+            # through the environment's cross-account reader role, so there is nothing to set
+            # and nothing to ask for. An environment that cannot do that read sets
+            # spec.sso.clientId by hand.
             sso: {}
-          {% endif %}
 
     - id: write-catalog-info
       name: Write the Backstage System entity
