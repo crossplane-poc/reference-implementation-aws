@@ -14,7 +14,6 @@ spec:
     - ./statefulbackend/template.yaml
     - ./s3/template.yaml
     - ./delete/template.yaml
-    - ./terraform/bootstrap-product/template.yaml
     - ./terraform/s3/template.yaml
 ---
 apiVersion: backstage.io/v1alpha1
