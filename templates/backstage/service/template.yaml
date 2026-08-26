@@ -153,9 +153,12 @@ spec:
         allowFrom:
           title: Services allowed to call this one
           type: array
+          description: >-
+            No port to pick: they reach this service on its own container port, which is already
+            answered above.
           items:
             type: object
-            required: [service, port]
+            required: [service]
             properties:
               service:
                 title: Service
@@ -165,9 +168,6 @@ spec:
                   catalogFilter:
                     kind: Component
                   defaultKind: Component
-              port:
-                title: Port
-                type: integer
           default: []
         allowTo:
           title: Services this one may call
@@ -185,8 +185,12 @@ spec:
                     kind: Component
                   defaultKind: Component
               port:
-                title: Port
+                title: Port it listens on
                 type: integer
+                description: >-
+                  The other service's port, not this one's — so it has to be given. If that
+                  service is also yours, declaring the rule from its side instead ("services
+                  allowed to call this one") fills the port in by itself.
           default: []
         egressDomains:
           title: Public addresses it may reach
@@ -253,7 +257,7 @@ spec:
           {% if parameters.allowFrom and parameters.allowFrom | length %}
               allowFrom:
           {% for r in parameters.allowFrom %}
-                - { service: ${{ r.service | parseEntityRef | pick('name') }}, port: ${{ r.port }} }
+                - { service: ${{ r.service | parseEntityRef | pick('name') }}, port: ${{ parameters.containerPort }} }
           {% endfor %}
           {% endif %}
           {% if parameters.allowTo and parameters.allowTo | length %}
@@ -343,15 +347,15 @@ spec:
           - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
             find: '\n    allowTo:\n'
-            replaceWith: "\n    allowTo:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }\n"
+            replaceWith: "\n    allowTo:\n      - { service: ${{ parameters.name }}, port: ${{ parameters.containerPort }} }\n"
           - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
             find: '\n  network:(?![\s\S]*\n    allowTo:)'
-            replaceWith: "\n  network:\n    allowTo:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }"
+            replaceWith: "\n  network:\n    allowTo:\n      - { service: ${{ parameters.name }}, port: ${{ parameters.containerPort }} }"
           - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
             find: '\nspec:(?![\s\S]*\n  network:)'
-            replaceWith: "\nspec:\n  network:\n    allowTo:\n      - { service: ${{ parameters.name }}, port: ${{ each.value.port }} }"
+            replaceWith: "\nspec:\n  network:\n    allowTo:\n      - { service: ${{ parameters.name }}, port: ${{ parameters.containerPort }} }"
 
     - id: mirror-allow-to
       name: Open the other end of each outbound rule
