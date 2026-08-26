@@ -2,11 +2,10 @@ apiVersion: scaffolder.backstage.io/v1beta3
 kind: Template
 metadata:
   name: s3
-  title: "S3"
+  title: "S3 bucket"
   description: >-
-    One S3 bucket, encrypted with its own key, private, versioned — a Prometeo ObjectStore.
-    Replaces tf-common-modules/modules/s3 plus its per-product IAM access policy. The product
-    must already exist (run the "product" template first).
+    One S3 bucket in a product, built from tf-common-modules/modules/s3 by Crossplane's Terraform
+    provider. Run the "product" template first.
   tags:
     - prometeo
 spec:
@@ -21,38 +20,47 @@ spec:
         name:
           title: Bucket component name
           type: string
-          description: e.g. "exports". Becomes the XR name.
+          description: e.g. "media". Becomes the XR name; the bucket lives in the product's namespace.
           pattern: '^[a-z][a-z0-9-]*$'
           ui:autofocus: true
         product:
           title: Product
           type: string
-          description: The product this bucket belongs to (must already exist in prometeo-products).
+          description: The product this bucket belongs to (run the "product" template first).
           ui:field: EntityPicker
           ui:options:
             catalogFilter:
               kind: System
             defaultKind: System
+        modulesVersion:
+          title: tf-common-modules version
+          type: string
+          default: ital-1901-add-sb3-environment
+          description: >-
+            Tag or branch this component is pinned to. Pinned per component so a module version
+            can be rolled forward one component at a time. No released tag accepts the sb3
+            environment yet, so this points at the ITAL-1901 branch.
+    - title: The bucket
+      properties:
         bucketName:
           title: Bucket name
           type: string
           description: >-
-            Full bucket name. Defaults to prometeo-<env>-<product>-<component> when left blank —
-            S3 names are globally unique, so set this if the default is already taken.
-    - title: Lifecycle and access
-      properties:
+            Full bucket name. Defaults to prometeo-<environment>-<product>-<component>. S3 names
+            are globally unique, so set this only if the default is taken.
         expirationDays:
           title: Expire objects after (days)
           type: integer
-          description: Leave blank to keep objects forever.
+          description: Deletes objects and non-current versions after this many days. Blank keeps them forever.
         access:
-          title: Service access
+          title: Services allowed to use the bucket
           type: array
           items:
             type: object
-            required: [service]
+            required: [service, level]
             properties:
               service:
+                title: Service
                 type: string
                 ui:field: EntityPicker
                 ui:options:
@@ -60,10 +68,14 @@ spec:
                     kind: Component
                   defaultKind: Component
               level:
+                title: Level
                 type: string
-                enum: [ro, rw]
+                enum: [r, rw]
                 default: rw
           default: []
+          description: >-
+            Each entry attaches a policy to that service's IAM role and mirrors this bucket's
+            connection ConfigMap into its namespace.
 
   steps:
     - id: write-component
@@ -72,29 +84,6 @@ spec:
       input:
         path: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ parameters.name }}.yaml
         content: |
-          # A standalone datastore always lives in its product's namespace — never in a
-          # service's. That is a constant, not a judgement call: it never has to move when a
-          # second consumer appears, and moving a namespaced XR means delete-and-recreate,
-          # which takes the AWS resource with it.
-          #
-          # Consumers therefore always read <name>-connection across a namespace boundary, so
-          # kubernetes-reflector must be installed — the datastore's composition annotates this
-          # ConfigMap for every service named in access. See prometeo DEPLOY.md 3.1.
-          #
-          # The Namespace object is repeated harmlessly by every datastore in this product (kubectl
-          # apply is idempotent on an identical object), and since it is only ever the product
-          # namespace, it can no longer collide with the richer Namespace a service template
-          # writes. Kept self-contained per file rather than centralized: Backstage template
-          # runs are stateless and can't append to a shared namespaces.yaml.
-          apiVersion: v1
-          kind: Namespace
-          metadata:
-            name: ${{ parameters.product | parseEntityRef | pick('name') }}
-            labels:
-              name: ${{ parameters.product | parseEntityRef | pick('name') }}
-              product: ${{ parameters.product | parseEntityRef | pick('name') }}
-              platform: prometeo
-          ---
           apiVersion: platform.prometeo.iag.ai/v1alpha1
           kind: ObjectStore
           metadata:
@@ -102,6 +91,8 @@ spec:
             namespace: ${{ parameters.product | parseEntityRef | pick('name') }}
           spec:
             product: ${{ parameters.product | parseEntityRef | pick('name') }}
+            modules:
+              version: ${{ parameters.modulesVersion | dump }}
           {% if parameters.bucketName %}
             bucketName: ${{ parameters.bucketName | dump }}
           {% endif %}
@@ -126,7 +117,7 @@ spec:
           kind: Resource
           metadata:
             name: ${{ parameters.name }}
-            description: ${{ ('ObjectStore ' + parameters.name + ' (product ' + (parameters.product | parseEntityRef | pick('name')) + ')') | dump }}
+            description: ${{ ('S3 bucket ' + parameters.name + ' (product ' + (parameters.product | parseEntityRef | pick('name')) + ')') | dump }}
             annotations:
               backstage.io/kubernetes-namespace: ${{ parameters.product | parseEntityRef | pick('name') }}
           spec:
@@ -143,8 +134,9 @@ spec:
         branchName: scaffolder/s3-${{ parameters.product | parseEntityRef | pick('name') }}-${{ parameters.name }}
         title: "prometeo s3: ${{ parameters.product | parseEntityRef | pick('name') }}/${{ parameters.name }}"
         description: >-
-          Adds `products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ parameters.name }}.yaml` (ObjectStore) and
-          its Backstage Resource entity, via the "s3" template.
+          Adds `products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ parameters.name }}.yaml`
+          (an ObjectStore) and its Backstage Resource entity. Syncing the product in ArgoCD runs
+          tf-common-modules/modules/s3 and creates the bucket.
 
   output:
     links:
