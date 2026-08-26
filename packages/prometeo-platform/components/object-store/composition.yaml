@@ -49,7 +49,15 @@ spec:
 
             {{- $product := default $ns $spec.product -}}
             {{- $modules := $spec.modules -}}
-            {{- $bucket := default (printf "prometeo-%s-%s-%s" $env.environment $product $name) $spec.bucketName -}}
+            {{- /* <product>-<last 4 of the account id>-<environment>-<name>, because that is what the
+                   VPC's S3 endpoint policy allows. The endpoint has private DNS enabled, so every
+                   S3 call from inside the VPC is evaluated against it as well as against IAM, and
+                   its statement for prometeo-terraform-provider is scoped to
+                   arn:aws:s3:::add-5486-sb3-*. A name outside that prefix is refused at
+                   CreateBucket with AccessDenied even though the role holds AdministratorAccess,
+                   and nothing in the IAM policy explains why. Overridable with spec.bucketName —
+                   an environment whose endpoint policy is scoped differently needs it. */ -}}
+            {{- $bucket := default (printf "%s-%s-%s-%s" $product (trunc -4 $env.accountId) $env.environment $name) $spec.bucketName -}}
             {{- $workspace := printf "prometeo-%s-%s-%s" $env.environment $product $name -}}
 
             {{- $access := list -}}
