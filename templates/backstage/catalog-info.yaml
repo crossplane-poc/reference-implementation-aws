@@ -5,7 +5,6 @@ metadata:
   description: >-
     Backstage templates for Prometeo's native Crossplane components (service, database,
     statefulbackend, s3), PR-ing generated manifests into crossplane-poc/prometeo-products.
-    Parallel terraform/* templates implement the PR-Driven IDP spike (Terraform PR, no Crossplane).
 spec:
   targets:
     - ./product/template.yaml
@@ -14,7 +13,6 @@ spec:
     - ./statefulbackend/template.yaml
     - ./s3/template.yaml
     - ./delete/template.yaml
-    - ./terraform/s3/template.yaml
 ---
 apiVersion: backstage.io/v1alpha1
 kind: Location
