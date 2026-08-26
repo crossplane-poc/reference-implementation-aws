@@ -155,12 +155,17 @@ spec:
           type: array
           description: They reach this service on its own container port, answered above.
           items:
-            type: string
-          ui:field: MultiEntityPicker
-          ui:options:
-            catalogFilter:
-              kind: Component
-            defaultKind: Component
+            type: object
+            required: [service]
+            properties:
+              service:
+                title: Service
+                type: string
+                ui:field: EntityPicker
+                ui:options:
+                  catalogFilter:
+                    kind: Component
+                  defaultKind: Component
           default: []
         allowTo:
           title: Services this one may call
@@ -169,12 +174,17 @@ spec:
             No port to pick here either: each one is looked up in the catalog, which records the
             port a service listens on.
           items:
-            type: string
-          ui:field: MultiEntityPicker
-          ui:options:
-            catalogFilter:
-              kind: Component
-            defaultKind: Component
+            type: object
+            required: [service]
+            properties:
+              service:
+                title: Service
+                type: string
+                ui:field: EntityPicker
+                ui:options:
+                  catalogFilter:
+                    kind: Component
+                  defaultKind: Component
           default: []
         egressDomains:
           title: Public addresses it may reach
@@ -226,7 +236,7 @@ spec:
         # be corrected there.
         expression: |
           picked.(
-            $name := $split($, "/")[-1];
+            $name := $split(service, "/")[-1];
             $ann := $$.catalog.items[metadata.name = $name].metadata.annotations.`iag.ai/container-port`;
             {
               "service": $name,
@@ -277,7 +287,7 @@ spec:
           {% if parameters.allowFrom and parameters.allowFrom | length %}
               allowFrom:
           {% for r in parameters.allowFrom %}
-                - { service: ${{ r | parseEntityRef | pick('name') }}, port: ${{ parameters.containerPort }} }
+                - { service: ${{ r.service | parseEntityRef | pick('name') }}, port: ${{ parameters.containerPort }} }
           {% endfor %}
           {% endif %}
           {% if resolvedAllowTo and resolvedAllowTo | length %}
@@ -352,11 +362,11 @@ spec:
       action: roadiehq:utils:fs:replace
       input:
         files:
-          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value | parseEntityRef | pick('name') }}.yaml
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
             find: '\n  access:\n'
             replaceWith: "\n  access:\n    - ${{ parameters.name }}\n"
-          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value | parseEntityRef | pick('name') }}.yaml
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
             find: '\nspec:(?![\s\S]*\n  access:)'
             replaceWith: "\nspec:\n  access:\n    - ${{ parameters.name }}"
@@ -367,15 +377,15 @@ spec:
       action: roadiehq:utils:fs:replace
       input:
         files:
-          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value | parseEntityRef | pick('name') }}.yaml
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
             find: '\n    allowTo:\n'
             replaceWith: "\n    allowTo:\n      - { service: ${{ parameters.name }}, port: ${{ parameters.containerPort }} }\n"
-          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value | parseEntityRef | pick('name') }}.yaml
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
             find: '\n  network:(?![\s\S]*\n    allowTo:)'
             replaceWith: "\n  network:\n    allowTo:\n      - { service: ${{ parameters.name }}, port: ${{ parameters.containerPort }} }"
-          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value | parseEntityRef | pick('name') }}.yaml
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
             find: '\nspec:(?![\s\S]*\n  network:)'
             replaceWith: "\nspec:\n  network:\n    allowTo:\n      - { service: ${{ parameters.name }}, port: ${{ parameters.containerPort }} }"
