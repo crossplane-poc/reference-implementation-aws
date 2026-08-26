@@ -247,12 +247,6 @@ spec:
           envFrom:
             - secretRef:
                 name: keycloak-config
-          env:
-            - name: KEYCLOAK_ADMIN_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: keycloak-admin-password-actual
-                  key: KEYCLOAK_ADMIN_PASSWORD
           command: ["/bin/bash", "-c"]
           args:
             - |
