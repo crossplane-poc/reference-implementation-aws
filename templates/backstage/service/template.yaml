@@ -111,15 +111,26 @@ spec:
                       type: array
                       description: >-
                         Create them with the "s3" template first, then pick them here. Each bucket
-                        is updated to grant this service read/write access.
+                        is updated to grant this service the access you choose.
                       items:
-                        type: string
-                      ui:field: MultiEntityPicker
-                      ui:options:
-                        catalogFilter:
-                          kind: Resource
-                          spec.type: object-store
-                        defaultKind: Resource
+                        type: object
+                        required: [bucket, level]
+                        properties:
+                          bucket:
+                            title: Bucket
+                            type: string
+                            ui:field: EntityPicker
+                            ui:options:
+                              catalogFilter:
+                                kind: Resource
+                                spec.type: object-store
+                              defaultKind: Resource
+                          level:
+                            title: Access
+                            type: string
+                            enum: [ro, rw]
+                            enumNames: ["Read only", "Read and write"]
+                            default: rw
                       default: []
                   required:
                     - components
@@ -284,7 +295,7 @@ spec:
               - ${{ ('resource:default/' + (parameters.database.component | parseEntityRef | pick('name'))) | dump }}
           {% endif %}
           {% for b in (parameters.buckets.components if (parameters.buckets and parameters.buckets.needed) else []) %}
-              - ${{ ('resource:default/' + (b | parseEntityRef | pick('name'))) | dump }}
+              - ${{ ('resource:default/' + (b.bucket | parseEntityRef | pick('name'))) | dump }}
           {% endfor %}
           {% endif %}
 
@@ -298,14 +309,14 @@ spec:
       action: roadiehq:utils:fs:replace
       input:
         files:
-          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value | parseEntityRef | pick('name') }}.yaml
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.bucket | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
             find: '\n  access:\n'
-            replaceWith: "\n  access:\n    - { service: ${{ parameters.name }}, level: rw }\n"
-          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value | parseEntityRef | pick('name') }}.yaml
+            replaceWith: "\n  access:\n    - { service: ${{ parameters.name }}, level: ${{ each.value.level }} }\n"
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.bucket | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
             find: '\nspec:(?![\s\S]*\n  access:)'
-            replaceWith: "\nspec:\n  access:\n    - { service: ${{ parameters.name }}, level: rw }"
+            replaceWith: "\nspec:\n  access:\n    - { service: ${{ parameters.name }}, level: ${{ each.value.level }} }"
 
     # Same for the database, whose access list is service names rather than objects.
     - id: grant-database-access

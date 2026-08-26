@@ -60,9 +60,11 @@ spec:
                     kind: Component
                   defaultKind: Component
               level:
-                title: Level
+                title: Access
                 type: string
-                enum: [r, rw]
+                # The XRD's own enum. "r" was offered here and would have been rejected.
+                enum: [ro, rw]
+                enumNames: ["Read only", "Read and write"]
                 default: rw
           default: []
           description: >-
