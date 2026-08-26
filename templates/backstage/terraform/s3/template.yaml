@@ -5,8 +5,8 @@ metadata:
   title: "S3 (Terraform PR)"
   description: >-
     PR-Driven IDP spike: one S3 bucket via tf-common-modules/modules/s3. Opens a PR with
-    Terraform HCL (not a Crossplane ObjectStore XR). Requires remote state backend configured
-    under products/<product>/terraform/. Run the "product" template first.
+    Terraform HCL (not a Crossplane ObjectStore XR). Run "Bootstrap a product", then
+    "Bootstrap product (Terraform)", before this template.
   tags:
     - prometeo
     - terraform

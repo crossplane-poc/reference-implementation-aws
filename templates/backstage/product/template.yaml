@@ -6,7 +6,7 @@ metadata:
   description: >-
     Step 1 for any new product in prometeo-products. Creates only the Backstage System entity
     (catalog-info.yaml) — no AWS, Crossplane, or Terraform. Run once per product before adding
-    components via Crossplane templates (base/) or S3 (Terraform PR) (terraform/).
+    components via Crossplane templates (base/) or Terraform (bootstrap product → S3, etc.).
   tags:
     - prometeo
 spec:
@@ -57,7 +57,7 @@ spec:
         description: >-
           Adds `products/${{ parameters.name }}/catalog-info.yaml` (System entity) via the "product"
           Backstage template. No infrastructure is provisioned. Add components next with Crossplane
-          templates (→ `base/`) or S3 (Terraform PR) (→ `terraform/`).
+          templates (→ `base/`) or Terraform bootstrap → resource templates (→ `terraform/`).
 
   output:
     links:
