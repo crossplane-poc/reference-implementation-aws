@@ -24,8 +24,9 @@ spec:
           title: Product
           type: string
           description: >-
-            The product to bootstrap (must already exist via "Bootstrap a product").
-            Creates products/<product>/terraform/backend.tf and versions.tf.
+            Catalog System without Terraform bootstrap yet (no
+            iag.ai/terraform-backend annotation). Creates products/<product>/terraform/
+            backend.tf and versions.tf, and marks the System as Terraform-ready.
           ui:field: EntityPicker
           ui:options:
             catalogFilter:
@@ -33,6 +34,33 @@ spec:
             defaultKind: System
 
   steps:
+    - id: fetch-system
+      name: Fetch System from catalog
+      action: catalog:fetch
+      input:
+        entityRef: ${{ parameters.product }}
+
+    - id: write-catalog-info
+      name: Mark System as Terraform-ready
+      action: roadiehq:utils:fs:write
+      input:
+        path: products/${{ parameters.product | parseEntityRef | pick('name') }}/catalog-info.yaml
+        content: |
+          {% set product = parameters.product | parseEntityRef | pick('name') %}
+          {% set entity = steps['fetch-system'].output.entity %}
+          apiVersion: backstage.io/v1alpha1
+          kind: System
+          metadata:
+            name: {{ product }}
+            description: {{ (entity.metadata.description | default('Prometeo product ' + product)) | dump }}
+            annotations:
+              iag.ai/terraform-backend: configured
+              backstage.io/kubernetes-label-selector: {{ (entity.metadata.annotations['backstage.io/kubernetes-label-selector'] | default('product=' + product + ',platform=prometeo')) | dump }}
+          spec:
+            owner: {{ entity.spec.owner | default('guests') }}
+            lifecycle: {{ entity.spec.lifecycle | default('experimental') }}
+            type: {{ entity.spec.type | default('service') }}
+
     - id: write-backend
       name: Write Terraform backend config
       action: roadiehq:utils:fs:write
@@ -102,8 +130,8 @@ spec:
           One-time Terraform bootstrap for product
           `${{ parameters.product | parseEntityRef | pick('name') }}`.
           Adds `products/${{ parameters.product | parseEntityRef | pick('name') }}/terraform/backend.tf`,
-          `versions.tf`, and `README.md`.
-          Review and merge before using S3 (Terraform PR) templates.
+          `versions.tf`, and `README.md`, and sets `iag.ai/terraform-backend: configured` on the
+          System entity. Review and merge before using S3 (Terraform PR) templates.
           This PR is not auto-merged.
 
   output:
