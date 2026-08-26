@@ -54,64 +54,75 @@ spec:
           description: The port the application listens on. Backends usually 8000, frontends 3000.
     - title: What it connects to
       properties:
-        needsDatabase:
-          title: Does it use a database?
-          type: boolean
-          default: false
-        needsBuckets:
-          title: Does it use any S3 buckets?
-          type: boolean
-          default: false
-      # Each picker only appears once its checkbox is ticked. One dependencies map holds both:
-      # a JSON Schema object can carry exactly one, and each key inside it is independent.
-      dependencies:
-        needsDatabase:
-          oneOf:
-            - properties:
-                needsDatabase:
-                  enum: [false]
-            - properties:
-                needsDatabase:
-                  enum: [true]
-                database:
-                  title: Database
-                  type: string
-                  description: >-
-                    Create it with the "database" template first, then pick it here. The service
-                    is granted access to it and gets its address automatically.
-                  ui:field: EntityPicker
-                  ui:options:
-                    catalogFilter:
-                      kind: Resource
-                      spec.type: database
-                    defaultKind: Resource
-              required:
-                - database
-        needsBuckets:
-          oneOf:
-            - properties:
-                needsBuckets:
-                  enum: [false]
-            - properties:
-                needsBuckets:
-                  enum: [true]
-                buckets:
-                  title: Buckets
-                  type: array
-                  description: >-
-                    Create them with the "s3" template first, then pick them here. Each bucket is
-                    updated to grant this service read/write access.
-                  items:
-                    type: string
-                  ui:field: MultiEntityPicker
-                  ui:options:
-                    catalogFilter:
-                      kind: Resource
-                      spec.type: object-store
-                    defaultKind: Resource
-                  default: []
-              required:
-                - buckets
+        # Two nested objects rather than two checkboxes side by side. A nested object renders as
+        # its own titled group, so the picker a checkbox reveals appears directly under that
+        # checkbox — with both on the flat page, one dependencies map put every revealed field
+        # after both boxes.
+        database:
+          title: Database
+          type: object
+          properties:
+            needed:
+              title: Does it use a database?
+              type: boolean
+              default: false
+          dependencies:
+            needed:
+              oneOf:
+                - properties:
+                    needed:
+                      enum: [false]
+                - properties:
+                    needed:
+                      enum: [true]
+                    component:
+                      title: Which one
+                      type: string
+                      description: >-
+                        Create it with the "database" template first, then pick it here. The
+                        service is granted access to it and gets its address automatically.
+                      ui:field: EntityPicker
+                      ui:options:
+                        catalogFilter:
+                          kind: Resource
+                          spec.type: database
+                        defaultKind: Resource
+                  required:
+                    - component
+        buckets:
+          title: S3 buckets
+          type: object
+          properties:
+            needed:
+              title: Does it use any S3 buckets?
+              type: boolean
+              default: false
+          dependencies:
+            needed:
+              oneOf:
+                - properties:
+                    needed:
+                      enum: [false]
+                - properties:
+                    needed:
+                      enum: [true]
+                    components:
+                      title: Which ones
+                      type: array
+                      description: >-
+                        Create them with the "s3" template first, then pick them here. Each bucket
+                        is updated to grant this service read/write access.
+                      items:
+                        type: string
+                      ui:field: MultiEntityPicker
+                      ui:options:
+                        catalogFilter:
+                          kind: Resource
+                          spec.type: object-store
+                        defaultKind: Resource
+                      default: []
+                  required:
+                    - components
     - title: AWS services
       properties:
         bedrock:
@@ -211,11 +222,11 @@ spec:
               version: ital-1901-add-sb3-environment
             bedrock: ${{ parameters.bedrock }}
             langfuse: ${{ parameters.langfuse }}
-          {% if parameters.needsDatabase and parameters.database %}
+          {% if parameters.database and parameters.database.needed and parameters.database.component %}
             database:
               enabled: true
               # Where the database publishes its address. Derived from the component you picked.
-              connection: ${{ ((parameters.database | parseEntityRef | pick('name')) + '-connection') | dump }}
+              connection: ${{ ((parameters.database.component | parseEntityRef | pick('name')) + '-connection') | dump }}
           {% endif %}
           {% if parameters.frontend %}
             ingress:
@@ -267,12 +278,12 @@ spec:
             lifecycle: experimental
             owner: guests
             system: ${{ parameters.product | parseEntityRef | pick('name') }}
-          {% if (parameters.needsDatabase and parameters.database) or (parameters.needsBuckets and parameters.buckets and parameters.buckets | length) %}
+          {% if (parameters.database and parameters.database.needed and parameters.database.component) or (parameters.buckets and parameters.buckets.needed and parameters.buckets.components and parameters.buckets.components | length) %}
             dependsOn:
-          {% if parameters.needsDatabase and parameters.database %}
-              - ${{ ('resource:default/' + (parameters.database | parseEntityRef | pick('name'))) | dump }}
+          {% if parameters.database and parameters.database.needed and parameters.database.component %}
+              - ${{ ('resource:default/' + (parameters.database.component | parseEntityRef | pick('name'))) | dump }}
           {% endif %}
-          {% for b in parameters.buckets %}
+          {% for b in (parameters.buckets.components if (parameters.buckets and parameters.buckets.needed) else []) %}
               - ${{ ('resource:default/' + (b | parseEntityRef | pick('name'))) | dump }}
           {% endfor %}
           {% endif %}
@@ -283,7 +294,7 @@ spec:
     # lookahead can still see whether an access key follows.
     - id: grant-bucket-access
       name: Grant this service access on each bucket
-      each: ${{ parameters.buckets if parameters.needsBuckets else [] }}
+      each: ${{ parameters.buckets.components if (parameters.buckets and parameters.buckets.needed) else [] }}
       action: roadiehq:utils:fs:replace
       input:
         files:
@@ -299,7 +310,7 @@ spec:
     # Same for the database, whose access list is service names rather than objects.
     - id: grant-database-access
       name: Grant this service a login on the database
-      each: ${{ [parameters.database] if (parameters.needsDatabase and parameters.database) else [] }}
+      each: ${{ [parameters.database.component] if (parameters.database and parameters.database.needed and parameters.database.component) else [] }}
       action: roadiehq:utils:fs:replace
       input:
         files:
