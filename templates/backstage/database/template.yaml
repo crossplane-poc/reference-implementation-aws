@@ -2,12 +2,10 @@ apiVersion: scaffolder.backstage.io/v1beta3
 kind: Template
 metadata:
   name: database
-  title: "Database"
+  title: "PostgreSQL database"
   description: >-
-    An Aurora PostgreSQL Serverless v2 cluster — a Prometeo PostgresDatabase. Replaces
-    tf-common-modules/modules/rds. Use this only for a database shared by more than one service;
-    a database private to one backend belongs on the "statefulbackend" template instead. The
-    product must already exist (run the "product" template first).
+    An Aurora PostgreSQL cluster in a product, built from tf-common-modules/modules/rds by
+    Crossplane's Terraform provider. Run the "product" template first.
   tags:
     - prometeo
 spec:
@@ -22,73 +20,76 @@ spec:
         name:
           title: Database component name
           type: string
-          description: e.g. "db". Becomes the XR name.
+          description: e.g. "add-db". Becomes the XR name; the cluster lives in the product's namespace.
           pattern: '^[a-z][a-z0-9-]*$'
           ui:autofocus: true
         product:
           title: Product
           type: string
-          description: The product this database belongs to (must already exist in prometeo-products).
+          description: The product this database belongs to (run the "product" template first).
           ui:field: EntityPicker
           ui:options:
             catalogFilter:
               kind: System
             defaultKind: System
-        databaseName:
-          title: Database name inside the cluster
+        modulesVersion:
+          title: tf-common-modules version
           type: string
-          description: Defaults to "<product>db" (hyphens removed) when left blank.
-    - title: Sizing and access
+          default: ital-1901-add-sb3-environment
+          description: >-
+            Tag or branch this component is pinned to. No released tag accepts the sb3 environment
+            yet, so this points at the ITAL-1901 branch.
+    - title: The cluster
       properties:
-        engineVersion:
-          title: Aurora PostgreSQL version
+        databaseName:
+          title: Database name
           type: string
-        minACU:
-          title: Min ACU
-          type: number
-        maxACU:
-          title: Max ACU
-          type: number
-        instances:
+          description: Defaults to "<product>db" with hyphens removed.
+        engineVersion:
+          title: Engine version
+          type: string
+          description: Defaults to the environment's setting, e.g. "16.11".
+        instanceCount:
           title: Instances
           type: integer
           default: 1
-          description: 1 for single-AZ, 2 for HA.
-        schemas:
-          title: Schemas to create at bootstrap
+          description: 1 for a single writer, 2 to add a reader.
+        minACU:
+          title: Minimum ACUs
+          type: number
+          description: Serverless v2 floor. Blank takes the environment's default.
+        maxACU:
+          title: Maximum ACUs
+          type: number
+          description: Serverless v2 ceiling. Blank takes the environment's default.
+    - title: Access
+      properties:
+        access:
+          title: Services granted rds-db:connect
           type: array
           items:
             type: string
+            ui:field: EntityPicker
+            ui:options:
+              catalogFilter:
+                kind: Component
+              defaultKind: Component
           default: []
-        access:
-          title: Service access
-          type: array
-          description: Services allowed to authenticate with IAM against this database.
-          items:
-            type: object
-            required: [service]
-            properties:
-              service:
-                type: string
-                ui:field: EntityPicker
-                ui:options:
-                  catalogFilter:
-                    kind: Component
-                  defaultKind: Component
-              level:
-                type: string
-                enum: [connect, admin]
-                default: connect
-          default: []
-        backupRetentionDays:
-          title: Backup retention (days)
-          type: integer
-          default: 7
-        deletionProtection:
-          title: Deletion protection
+          description: >-
+            Each entry grants that service's IAM role IAM auth on the database and mirrors this
+            component's connection ConfigMap into its namespace.
+        k8sAccess:
+          title: Port-forward access
           type: boolean
-          default: false
-          description: Leave off outside prd — turning it on blocks deletion until it's turned off again.
+          default: true
+          description: An HAProxy in a <product>-db-ops namespace, so a laptop can port-forward to the cluster.
+        bootstrapLambda:
+          title: Create the IAM-auth database users
+          type: boolean
+          default: true
+          description: >-
+            The Lambda that creates iam_user, iam_migration_user and admin_iam on first apply.
+            Without it an application authenticating with IAM has no role to log in as.
 
   steps:
     - id: write-component
@@ -97,29 +98,6 @@ spec:
       input:
         path: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ parameters.name }}.yaml
         content: |
-          # A standalone datastore always lives in its product's namespace — never in a
-          # service's. That is a constant, not a judgement call: it never has to move when a
-          # second consumer appears, and moving a namespaced XR means delete-and-recreate,
-          # which takes the AWS resource with it.
-          #
-          # Consumers therefore always read <name>-connection across a namespace boundary, so
-          # kubernetes-reflector must be installed — the datastore's composition annotates this
-          # ConfigMap for every service named in access. See prometeo DEPLOY.md 3.1.
-          #
-          # The Namespace object is repeated harmlessly by every datastore in this product (kubectl
-          # apply is idempotent on an identical object), and since it is only ever the product
-          # namespace, it can no longer collide with the richer Namespace a service template
-          # writes. Kept self-contained per file rather than centralized: Backstage template
-          # runs are stateless and can't append to a shared namespaces.yaml.
-          apiVersion: v1
-          kind: Namespace
-          metadata:
-            name: ${{ parameters.product | parseEntityRef | pick('name') }}
-            labels:
-              name: ${{ parameters.product | parseEntityRef | pick('name') }}
-              product: ${{ parameters.product | parseEntityRef | pick('name') }}
-              platform: prometeo
-          ---
           apiVersion: platform.prometeo.iag.ai/v1alpha1
           kind: PostgresDatabase
           metadata:
@@ -127,35 +105,29 @@ spec:
             namespace: ${{ parameters.product | parseEntityRef | pick('name') }}
           spec:
             product: ${{ parameters.product | parseEntityRef | pick('name') }}
+            modules:
+              version: ${{ parameters.modulesVersion | dump }}
           {% if parameters.databaseName %}
             databaseName: ${{ parameters.databaseName | dump }}
           {% endif %}
           {% if parameters.engineVersion %}
             engineVersion: ${{ parameters.engineVersion | dump }}
           {% endif %}
-          {% if parameters.schemas and parameters.schemas | length %}
-            schemas:
-          {% for s in parameters.schemas %}
-              - ${{ s }}
-          {% endfor %}
-          {% endif %}
-            capacity:
-              instances: ${{ parameters.instances }}
+            instanceCount: ${{ parameters.instanceCount }}
           {% if parameters.minACU %}
-              minACU: ${{ parameters.minACU }}
+            minACU: ${{ parameters.minACU }}
           {% endif %}
           {% if parameters.maxACU %}
-              maxACU: ${{ parameters.maxACU }}
+            maxACU: ${{ parameters.maxACU }}
           {% endif %}
           {% if parameters.access and parameters.access | length %}
             access:
           {% for a in parameters.access %}
-              - service: ${{ a.service | parseEntityRef | pick('name') }}
-                level: ${{ a.level }}
+              - ${{ a | parseEntityRef | pick('name') }}
           {% endfor %}
           {% endif %}
-            backupRetentionDays: ${{ parameters.backupRetentionDays }}
-            deletionProtection: ${{ parameters.deletionProtection }}
+            k8sAccess: ${{ parameters.k8sAccess }}
+            bootstrapLambda: ${{ parameters.bootstrapLambda }}
 
     - id: write-catalog-info
       name: Write the Backstage Resource entity
@@ -184,8 +156,9 @@ spec:
         branchName: scaffolder/database-${{ parameters.product | parseEntityRef | pick('name') }}-${{ parameters.name }}
         title: "prometeo database: ${{ parameters.product | parseEntityRef | pick('name') }}/${{ parameters.name }}"
         description: >-
-          Adds `products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ parameters.name }}.yaml` (PostgresDatabase)
-          and its Backstage Resource entity, via the "database" template.
+          Adds `products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ parameters.name }}.yaml`
+          (a PostgresDatabase) and its Backstage Resource entity. Syncing the product in ArgoCD
+          runs tf-common-modules/modules/rds and creates the Aurora cluster.
 
   output:
     links:

@@ -4,33 +4,133 @@ metadata:
   name: product
   title: "Bootstrap a product"
   description: >-
-    Step 1 for a new product built from Prometeo's native Crossplane components. Creates the
-    product's Backstage System entity in crossplane-poc/prometeo-products. Run this once per
-    product, before adding any service, database, statefulbackend or s3 component to it.
+    Step 1 for a new product. Creates the product's namespace, its Product component (DNS, the
+    developer role, the SSO WebACL, optionally an Airflow client) and its Backstage System entity.
+    Run this once, then add services, databases and buckets to it.
   tags:
     - prometeo
 spec:
   owner: guests
-  type: service
+  type: system
   parameters:
-    - title: Product
+    - title: Placement
       required:
         - name
       properties:
         name:
           title: Product name
           type: string
-          description: Short lowercase name, e.g. "add". Used as the product tag and the folder name.
+          description: >-
+            e.g. "add". Becomes the namespace every component of this product lives in, and the
+            Product AWS tag everything is grouped by for cost reporting.
           pattern: '^[a-z][a-z0-9-]*$'
           ui:autofocus: true
         description:
           title: Description
           type: string
-          description: Shown on the product's Backstage System entity.
+          description: Shown on the System entity in the catalog.
+        modulesVersion:
+          title: tf-common-modules version
+          type: string
+          default: ital-1901-add-sb3-environment
+          description: >-
+            Tag or branch every module call in this product is pinned to. No released tag accepts
+            the sb3 environment yet — v6.5.1 and earlier fail the plan with "environment must be
+            one of: sb1, sb2, dev, tst, uat, prd" — so this points at the ITAL-1901 branch until
+            that merges and is tagged.
+    - title: What the product gets
+      properties:
+        developerRole:
+          title: Developer role
+          type: boolean
+          default: true
+          description: An IAM role product developers assume, granted each component's policies.
+        developerBedrock:
+          title: Bedrock for the developer role
+          type: boolean
+          default: false
+        airflowEnabled:
+          title: Airflow client
+          type: boolean
+          default: false
+          description: An ETLs bucket and grants on the airflow-<product> role.
+        airflowRepos:
+          title: Airflow GitHub repositories
+          type: array
+          items:
+            type: string
+          default: []
+          description: Repositories allowed to deploy DAGs, e.g. ["iag-mro-add-data"].
+    - title: SSO
+      properties:
+        ssoClientId:
+          title: Cognito client id
+          type: string
+          description: >-
+            Leave blank in a normal environment: the apply reads the id from SSM at
+            /prometeo/<environment>/<product>/sso-client-id, through the environment's
+            cross-account reader role. Set a literal id only where that read is not possible —
+            it is stored in plain text on the Workspace.
 
   steps:
+    - id: write-namespace
+      name: Write the product namespace
+      action: roadiehq:utils:fs:write
+      input:
+        path: products/${{ parameters.name }}/base/namespace.yaml
+        content: |
+          # One namespace for the whole product, not one per service. The pods and their own
+          # namespaces are created by Terraform inside the workspaces, so this namespace holds
+          # control-plane objects only: the product's XRs, their Workspaces, and the ConfigMaps
+          # they publish to each other.
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: ${{ parameters.name }}
+            labels:
+              name: ${{ parameters.name }}
+              product: ${{ parameters.name }}
+              platform: prometeo
+
+    - id: write-component
+      name: Write the Product manifest
+      action: roadiehq:utils:fs:write
+      input:
+        path: products/${{ parameters.name }}/base/product.yaml
+        content: |
+          apiVersion: platform.prometeo.iag.ai/v1alpha1
+          kind: Product
+          metadata:
+            name: ${{ parameters.name }}
+            namespace: ${{ parameters.name }}
+          spec:
+            product: ${{ parameters.name }}
+            modules:
+              version: ${{ parameters.modulesVersion | dump }}
+            developerRole:
+              enabled: ${{ parameters.developerRole }}
+              bedrock: ${{ parameters.developerBedrock }}
+          {% if parameters.airflowEnabled %}
+            airflow:
+              enabled: true
+          {% if parameters.airflowRepos and parameters.airflowRepos | length %}
+              githubRepos:
+          {% for r in parameters.airflowRepos %}
+                - ${{ r | dump }}
+          {% endfor %}
+          {% endif %}
+          {% endif %}
+          {% if parameters.ssoClientId %}
+            sso:
+              # A literal id, because this environment cannot read the SSM parameter.
+              clientId: ${{ parameters.ssoClientId | dump }}
+          {% else %}
+            # The Cognito client id is read from SSM during the apply — nothing to set here.
+            sso: {}
+          {% endif %}
+
     - id: write-catalog-info
-      name: Write the product's System entity
+      name: Write the Backstage System entity
       action: roadiehq:utils:fs:write
       input:
         path: products/${{ parameters.name }}/catalog-info.yaml
@@ -42,6 +142,7 @@ spec:
             description: ${{ (parameters.description | default('Prometeo product ' + parameters.name)) | dump }}
             annotations:
               backstage.io/kubernetes-label-selector: 'product=${{ parameters.name }},platform=prometeo'
+              backstage.io/kubernetes-namespace: ${{ parameters.name }}
           spec:
             owner: guests
             lifecycle: experimental
@@ -53,12 +154,12 @@ spec:
       input:
         repoUrl: github.com?repo=prometeo-products&owner=crossplane-poc
         branchName: scaffolder/product-${{ parameters.name }}
-        title: 'prometeo product: bootstrap ${{ parameters.name }}'
+        title: 'prometeo product: ${{ parameters.name }}'
         description: >-
-          Adds `products/${{ parameters.name }}/catalog-info.yaml` (System entity) via the "product"
-          Backstage template. Add its service/database/statefulbackend/s3 components next — each
-          lands in `products/${{ parameters.name }}/base/` and gets picked up automatically, no file
-          list to maintain.
+          Adds `products/${{ parameters.name }}/` — the namespace, the Product component and the
+          Backstage System entity. Merging opens the directory to ArgoCD; syncing it provisions
+          the product's DNS, developer role and SSO WebACL through
+          tf-common-modules/bootstrap-product.
 
   output:
     links:

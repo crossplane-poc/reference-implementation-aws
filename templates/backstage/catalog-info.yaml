@@ -3,14 +3,14 @@ kind: Location
 metadata:
   name: prometeo-templates
   description: >-
-    Backstage templates for Prometeo's native Crossplane components (service, database,
-    statefulbackend, s3), PR-ing generated manifests into crossplane-poc/prometeo-products.
+    Backstage templates for Prometeo's components. Each writes a Crossplane manifest into
+    crossplane-poc/prometeo-products through a pull request; the component runs a tf-common-module
+    under provider-terraform once ArgoCD syncs it.
 spec:
   targets:
     - ./product/template.yaml
     - ./service/template.yaml
     - ./database/template.yaml
-    - ./statefulbackend/template.yaml
     - ./s3/template.yaml
     - ./delete/template.yaml
 ---
