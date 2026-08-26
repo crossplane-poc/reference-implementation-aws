@@ -32,29 +32,24 @@ spec:
             catalogFilter:
               kind: System
             defaultKind: System
-    - title: Size and version
+    - title: Engine
       properties:
-        databaseName:
-          title: Database name
-          type: string
-          description: Defaults to "<product>db" with hyphens removed.
         engineVersion:
-          title: Engine version
+          title: PostgreSQL version
           type: string
-          description: Defaults to the environment's setting, e.g. "16.11".
-        instanceCount:
-          title: Instances
-          type: integer
-          default: 1
-          description: 1 for a single writer, 2 to add a reader.
-        minACU:
-          title: Minimum ACUs
-          type: number
-          description: Serverless v2 floor. Blank takes the environment's default.
-        maxACU:
-          title: Maximum ACUs
-          type: number
-          description: Serverless v2 ceiling. Blank takes the environment's default.
+          # Checked against `aws rds describe-db-engine-versions --engine aurora-postgresql` in
+          # eu-west-1: the newest of each major that is available and not a -limitless variant.
+          # 16.11 is what the environment defaults to, so it stays the default here.
+          enum: ["16.11", "16.14", "17.10", "18.4"]
+          enumNames:
+            - "16.11 (default)"
+            - "16.14"
+            - "17.10"
+            - "18.4"
+          default: "16.11"
+          description: >-
+            Everything else about the cluster — its name, size and instance count — comes from
+            the environment's defaults.
     - title: Access
       properties:
         access:
@@ -91,18 +86,19 @@ spec:
               # the sb3 environment yet: every tag up to v6.5.1 fails the plan with "environment
               # must be one of: sb1, sb2, dev, tst, uat, prd".
               version: ital-1901-add-sb3-environment
-          {% if parameters.databaseName %}
-            databaseName: ${{ parameters.databaseName | dump }}
-          {% endif %}
-          {% if parameters.engineVersion %}
+            # The database name defaults to <product>db, and the sizing — ACU floor and
+            # ceiling, instance count — comes from the environment. None of it is worth asking.
             engineVersion: ${{ parameters.engineVersion | dump }}
-          {% endif %}
-            instanceCount: ${{ parameters.instanceCount }}
-          {% if parameters.minACU %}
-            minACU: ${{ parameters.minACU }}
-          {% endif %}
-          {% if parameters.maxACU %}
-            maxACU: ${{ parameters.maxACU }}
+            # The parameter group family has to match the engine's major version. It is a
+            # separate field on the XRD, so picking 18.4 while family stayed at
+            # aurora-postgresql16 would fail the apply. Spelled out rather than derived by
+            # string-splitting, which the scaffolder's sandbox may not allow.
+          {% if parameters.engineVersion == "18.4" %}
+            family: aurora-postgresql18
+          {% elif parameters.engineVersion == "17.10" %}
+            family: aurora-postgresql17
+          {% else %}
+            family: aurora-postgresql16
           {% endif %}
           {% if parameters.access and parameters.access | length %}
             access:
