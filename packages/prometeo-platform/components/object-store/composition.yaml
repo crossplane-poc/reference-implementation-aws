@@ -1,0 +1,229 @@
+# The module HCL is inlined below; this file is the source of truth. It was originally
+# spliced together by a generator that is not part of this repository.
+# How a ObjectStore is built.
+#
+#   tf.m.upbound.io/Workspace       one s3 module call, plus the IAM policies and attachments
+#                                   that grant the services access — written as plain resources
+#                                   in the same root module, because tf-common-modules has no
+#                                   module for a grant
+#   ConfigMap <name>-connection     S3_BUCKET / S3_BUCKET_ARN, the keys the native ObjectStore
+#                                   publishes
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: objectstore.platform.prometeo.iag.ai
+  labels:
+    crossplane.io/xrd: objectstores.platform.prometeo.iag.ai
+spec:
+  compositeTypeRef:
+    apiVersion: platform.prometeo.iag.ai/v1alpha1
+    kind: ObjectStore
+  mode: Pipeline
+  pipeline:
+    - step: environment
+      functionRef:
+        name: function-environment-configs
+      input:
+        apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+        kind: Input
+        spec:
+          environmentConfigs:
+            - type: Reference
+              ref:
+                name: prometeo-environment
+
+    - step: workspace
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            {{- $name := $xr.metadata.name -}}
+            {{- $ns := $xr.metadata.namespace -}}
+            {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
+
+            {{- $product := default $ns $spec.product -}}
+            {{- $modules := $spec.modules -}}
+            {{- $bucket := default (printf "prometeo-%s-%s-%s" $env.environment $product $name) $spec.bucketName -}}
+            {{- $workspace := printf "prometeo-%s-%s-%s" $env.environment $product $name -}}
+
+            {{- $access := list -}}
+            {{- range $g := $spec.access -}}
+            {{- $access = append $access (dict "service" $g.service "level" (default "rw" $g.level)) -}}
+            {{- end -}}
+
+            {{- $vars := dict
+                  "bucket_name" $bucket
+                  "expiration_days" (default 0 $spec.expirationDays)
+                  "access" $access
+                  "tags" (merge (dict "Name" $bucket "Product" $product "Component" $name) $env.tags) }}
+            ---
+            apiVersion: tf.m.upbound.io/v1beta1
+            kind: Workspace
+            metadata:
+              name: {{ $name }}
+              namespace: {{ $ns }}
+              annotations:
+                {{ setResourceNameAnnotation "workspace" }}
+                crossplane.io/external-name: {{ $workspace | quote }}
+            spec:
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: terraform
+              writeConnectionSecretToRef:
+                name: {{ $name }}-outputs
+              forProvider:
+                source: Inline
+                inlineFormat: HCL
+                enableTerraformCLILogging: true
+                varmap: {{ $vars | toJson }}
+                module: |
+                  locals {
+                    grants = { for a in var.access : a.service => a }
+
+                    object_actions = {
+                      ro = ["s3:GetObject", "s3:GetObjectTagging"]
+                      rw = [
+                        "s3:GetObject",
+                        "s3:PutObject",
+                        "s3:DeleteObject",
+                        "s3:GetObjectTagging",
+                        "s3:PutObjectTagging",
+                        "s3:DeleteObjectTagging",
+                      ]
+                    }
+                  }
+
+                  module "bucket" {
+                    source = "{{ $modules.source }}//modules/s3?ref={{ $modules.version }}"
+
+                    bucket_name               = var.bucket_name
+                    lifecycle_expiration_days = var.expiration_days > 0 ? var.expiration_days : null
+                    tags                      = var.tags
+                  }
+
+                  # No module for "let this service read that bucket", so the grants are plain
+                  # resources next to the module call — one policy per grantee, attached to the
+                  # role bootstrap-service named after the service.
+                  resource "aws_iam_policy" "access" {
+                    for_each = local.grants
+
+                    name        = "${var.bucket_name}-${each.value.level}-${each.key}"
+                    description = "${each.value.level} access to ${var.bucket_name} for ${each.key}"
+
+                    policy = jsonencode({
+                      Version = "2012-10-17"
+                      Statement = [
+                        {
+                          Sid      = "ListBucket"
+                          Effect   = "Allow"
+                          Action   = ["s3:ListBucket"]
+                          Resource = [module.bucket.bucket_arn]
+                        },
+                        {
+                          Sid      = "ObjectActions"
+                          Effect   = "Allow"
+                          Action   = local.object_actions[each.value.level]
+                          Resource = ["${module.bucket.bucket_arn}/*"]
+                        },
+                        {
+                          Sid      = "UseTheBucketKey"
+                          Effect   = "Allow"
+                          Action   = ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
+                          Resource = [module.bucket.kms_key_arn]
+                        },
+                      ]
+                    })
+                  }
+
+                  resource "aws_iam_role_policy_attachment" "access" {
+                    for_each = local.grants
+
+                    role       = each.key
+                    policy_arn = aws_iam_policy.access[each.key].arn
+                  }
+
+                  output "bucket_name" {
+                    value = module.bucket.bucket_name
+                  }
+
+                  output "bucket_arn" {
+                    value = module.bucket.bucket_arn
+                  }
+
+                  # One S3 bucket from tf-common-modules/s3, plus one IAM policy per service in spec.access.
+                  #
+                  # The `?ref=` in main.tf is rewritten from the XR's spec.modules when these files are spliced
+                  # into the composition (scripts/build.py); the literal is the default pin the tests run against.
+                  variable "bucket_name" { type = string }
+
+                  variable "expiration_days" { type = number }
+
+                  variable "tags" { type = map(string) }
+
+                  variable "access" {
+                    type = list(object({ service = string, level = string }))
+                  }
+    - step: connection
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            {{- $name := $xr.metadata.name -}}
+            {{- $ns := $xr.metadata.namespace -}}
+            {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
+
+            {{- $product := default $ns $spec.product -}}
+            {{- $workspace := printf "prometeo-%s-%s-%s" $env.environment $product $name -}}
+            {{- $observed := default dict .observed.resources -}}
+            {{- $out := dig "status" "atProvider" "outputs" dict (dig "workspace" "resource" dict $observed) -}}
+
+            {{- $bucket := dig "bucket_name" "" $out -}}
+            {{- $arn := dig "bucket_arn" "" $out -}}
+            {{- $prefix := upper (replace "-" "_" $name) -}}
+
+            {{- $grantees := list -}}
+            {{- range $g := $spec.access }}{{ $grantees = append $grantees $g.service }}{{ end -}}
+            {{- $granteeCsv := join "," $grantees }}
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: {{ $name }}-connection
+              namespace: {{ $ns }}
+              annotations:
+                {{ setResourceNameAnnotation "connection" }}
+                gotemplating.fn.crossplane.io/ready: "True"
+                {{- if $grantees }}
+                reflector.v1.k8s.emberstack.com/reflection-allowed: "true"
+                reflector.v1.k8s.emberstack.com/reflection-allowed-namespaces: {{ $granteeCsv | quote }}
+                reflector.v1.k8s.emberstack.com/reflection-auto-enabled: "true"
+                reflector.v1.k8s.emberstack.com/reflection-auto-namespaces: {{ $granteeCsv | quote }}
+                {{- end }}
+            data:
+              S3_BUCKET: {{ $bucket | quote }}
+              S3_BUCKET_ARN: {{ $arn | quote }}
+              {{ $prefix }}_S3_BUCKET: {{ $bucket | quote }}
+              {{ $prefix }}_S3_BUCKET_ARN: {{ $arn | quote }}
+            ---
+            apiVersion: platform.prometeo.iag.ai/v1alpha1
+            kind: ObjectStore
+            status:
+              workspace: {{ $workspace | quote }}
+              bucketName: {{ $bucket | quote }}
+              bucketArn: {{ $arn | quote }}
+
+    - step: ready
+      functionRef:
+        name: function-auto-ready

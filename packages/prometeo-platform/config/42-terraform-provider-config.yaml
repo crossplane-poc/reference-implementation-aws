@@ -1,0 +1,104 @@
+# The root-module plumbing every Workspace inherits: providers, state backend, credentials.
+#
+# provider-terraform writes `spec.configuration` into each workspace directory as an extra .tf
+# file, so this is literally the top of the root module. Keeping it here rather than in the
+# composition means a Workspace only ever contains the product — the module calls — the same
+# split IMS has between `environments/<env>/<region>/providers.tf` and `modules/products/add`.
+#
+# Credentials: `source: None` writes no credentials file, which leaves Terraform's AWS provider
+# to pick up the pod's IRSA web identity from the environment (AWS_ROLE_ARN and
+# AWS_WEB_IDENTITY_TOKEN_FILE are injected by EKS). The `filename` field is required by the
+# schema and unused.
+#
+# State: the kubernetes backend keeps state in Secrets in crossplane-system, one per Terraform
+# workspace (`tfstate-<workspace>-prometeo`), and the provider selects a workspace per Workspace
+# object. This is deliberately NOT the IMS S3 backend — a control plane reconciling a stack
+# every 30 minutes must not share state files with the CI pipeline that owns the Terraform-only
+# products. To point it at S3 instead, replace the backend block with:
+#
+#   backend "s3" {
+#     bucket               = "ims-<account>-eu-west-1-tfstate"
+#     key                  = "crossplane.tfstate"
+#     workspace_key_prefix = "prometeo"
+#     region               = "eu-west-1"
+#   }
+#
+# ...and remember the account id makes this file environment-specific again.
+apiVersion: tf.m.upbound.io/v1beta1
+kind: ClusterProviderConfig
+metadata:
+  name: terraform
+spec:
+  # Cache provider plugins in /tf/plugin-cache between runs — otherwise every reconcile of every
+  # workspace re-downloads ~600MB of hashicorp/aws.
+  pluginCache: true
+  credentials:
+    - filename: unused.ini
+      source: None
+  configuration: |
+    terraform {
+      required_version = ">= 1.13"
+
+      required_providers {
+        aws = {
+          source  = "hashicorp/aws"
+          version = "~> 6.28.0"
+        }
+        kubernetes = {
+          source  = "hashicorp/kubernetes"
+          version = "~> 2.38"
+        }
+        helm = {
+          source  = "hashicorp/helm"
+          version = "~> 2.17.0"
+        }
+        kubectl = {
+          source  = "gavinbunney/kubectl"
+          version = "~> 1.19"
+        }
+        random = {
+          source  = "hashicorp/random"
+          version = "~> 3.6"
+        }
+      }
+
+      backend "kubernetes" {
+        secret_suffix     = "prometeo"
+        namespace         = "crossplane-system"
+        in_cluster_config = true
+      }
+    }
+
+    provider "aws" {
+      region = "eu-west-1"
+    }
+
+    # bootstrap-product and bootstrap-service both declare `configuration_aliases = [aws.us_east_1]`
+    # for CloudFront's certificate and Lambda@Edge functions, so the root module must define it.
+    provider "aws" {
+      alias  = "us_east_1"
+      region = "us-east-1"
+    }
+
+    # The cluster Terraform manages is the one it runs in: the provider pod's service account
+    # token, not a kubeconfig. See 33-rbac-terraform.yaml for what that account may do.
+    provider "kubernetes" {
+      host                   = "https://kubernetes.default.svc"
+      cluster_ca_certificate = file("/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
+      token                  = file("/var/run/secrets/kubernetes.io/serviceaccount/token")
+    }
+
+    provider "helm" {
+      kubernetes {
+        host                   = "https://kubernetes.default.svc"
+        cluster_ca_certificate = file("/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
+        token                  = file("/var/run/secrets/kubernetes.io/serviceaccount/token")
+      }
+    }
+
+    provider "kubectl" {
+      host                   = "https://kubernetes.default.svc"
+      cluster_ca_certificate = file("/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
+      token                  = file("/var/run/secrets/kubernetes.io/serviceaccount/token")
+      load_config_file       = false
+    }

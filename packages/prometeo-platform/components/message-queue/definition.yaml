@@ -1,0 +1,73 @@
+# MessageQueue — one SQS queue and its dead-letter queue, from tf-common-modules/sqs.
+#
+# Encrypted with its own KMS key, with per-service IAM grants. Native equivalent:
+# `MessageQueue`, publishing the same connection ConfigMap keys.
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: messagequeues.platform.prometeo.iag.ai
+spec:
+  scope: Namespaced
+  group: platform.prometeo.iag.ai
+  names:
+    kind: MessageQueue
+    plural: messagequeues
+    shortNames:
+      - mq
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                product:
+                  type: string
+                  description: Defaults to the XR's namespace.
+                modules:
+                  type: object
+                  properties:
+                    source:
+                      type: string
+                      default: git::ssh://git@github.com/IAGAI/tf-common-modules.git
+                    version:
+                      type: string
+                      default: v6.5.1
+                  default: {}
+                queueName:
+                  type: string
+                  description: Defaults to `prometeo-<env>-<product>-<name>`.
+                visibilityTimeoutSeconds:
+                  type: integer
+                  description: How long a received message stays invisible. Set it above the consumer's worst-case processing time.
+                  default: 30
+                deadLetter:
+                  type: object
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: true
+                    maxReceiveCount:
+                      type: integer
+                      description: Deliveries before a message is moved to the dead-letter queue.
+                      default: 5
+                  default: {}
+                access:
+                  type: array
+                  description: Services allowed to send and receive on the queue, by name.
+                  items:
+                    type: string
+                  default: []
+            status:
+              type: object
+              properties:
+                workspace:
+                  type: string
+                queueUrl:
+                  type: string
+                queueArn:
+                  type: string

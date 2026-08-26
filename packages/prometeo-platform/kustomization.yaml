@@ -1,0 +1,16 @@
+# The Prometeo component platform: the Crossplane pieces that turn a manifest in
+# crossplane-poc/prometeo-products into AWS infrastructure.
+#
+# Everything here used to be applied by hand with kubectl. ArgoCD owns it now, which is the
+# only reason a change to a composition can reach the cluster through a pull request.
+#
+# The three directories are ordered by sync wave, because each needs the CRDs the previous one
+# installs: packages (-20) brings the provider and functions, config (-10) configures them,
+# components (0) defines the API product teams actually use.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - packages
+  - config
+  - components

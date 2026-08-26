@@ -1,0 +1,118 @@
+# The Terraform provider, and the pod it runs in.
+#
+# Unlike the AWS providers, this one does not talk to AWS APIs itself: it shells out to a
+# `terraform` binary, one working directory per Workspace. Everything it needs to do that is
+# runtime configuration rather than provider configuration —
+#
+#   image        a custom build, because the upstream one ships Terraform 1.5.7 and every
+#                tf-common-module declares `required_version = ">= 1.13"`. See
+#                ../runtime-image/README.md; without it every apply fails at `terraform init`.
+#   IRSA         the role Terraform's own AWS provider assumes (prometeo-terraform-provider).
+#                Much broader than the AWS providers' role — Terraform creates whatever the
+#                modules create.
+#   SSH key      tf-common-modules is private, so `terraform init` needs a deploy key.
+#   --timeout    the provider kills terraform after 20 minutes by default and loses the state
+#                lock with it. An Aurora cluster plus a CloudFront distribution takes longer.
+#   /tf          scratch space: module checkouts, provider plugins, plan files.
+#
+# Terraform's own stdout is per-Workspace, not a provider flag: `enableTerraformCLILogging`
+# on the Workspace sends it to this pod's log, which is the only place to read why an apply
+# failed — the Workspace's condition carries just the last error line.
+#
+# The account id and image tag below are sb3's, applied directly rather than through an
+# overlay — this package is what ArgoCD syncs into that one cluster.
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: terraform-runtime
+spec:
+  serviceAccountTemplate:
+    metadata:
+      # Pinned rather than generated: 33-rbac-terraform.yaml binds to this name.
+      name: provider-terraform
+      annotations:
+        eks.amazonaws.com/role-arn: arn:aws:iam::515048895486:role/prometeo-terraform-provider
+  deploymentTemplate:
+    spec:
+      selector: {}
+      template:
+        spec:
+          initContainers:
+            # Crossplane runs the provider as uid 2000; a Secret volume's files stay root-owned,
+            # so the mount is world-readable inside the pod (0444) and the key is copied out to
+            # 0400 owned by the runtime user before terraform ever calls ssh.
+            - name: git-key
+              image: 515048895486.dkr.ecr.eu-west-1.amazonaws.com/prometeo/provider-terraform:v1.1.1-tf1.13-r3
+              command:
+                - /bin/sh
+                - -c
+                - mkdir -p /tf/.ssh && cp /etc/git-secret/ssh /tf/.ssh/id && chmod 0400 /tf/.ssh/id
+              volumeMounts:
+                - name: git-secret
+                  mountPath: /etc/git-secret
+                  readOnly: true
+                - name: workdir
+                  mountPath: /tf
+          containers:
+            - name: package-runtime
+              # Patched per environment to the account's ECR copy of the Terraform 1.13 image.
+              image: 515048895486.dkr.ecr.eu-west-1.amazonaws.com/prometeo/provider-terraform:v1.1.1-tf1.13-r3
+              args:
+                # A product stack is one workspace: bootstrap-product, two services and an
+                # Aurora cluster in a single apply. 20m (the default) is not enough.
+                - --timeout=60m
+                # How often each Workspace is re-planned to detect drift. Every poll is a full
+                # init+plan against AWS, so this is the real cost of running Terraform this way.
+                - --poll=30m
+                # One terraform process at a time. Raising this multiplies CPU by the same factor.
+                - --max-reconcile-rate=1
+              env:
+                # The key is read from the copy the init container makes, not from the mount:
+                # ssh refuses a private key that any group or other bit can reach, and a Secret
+                # volume cannot hand a file to uid 2000 with mode 0400.
+                - name: GIT_SSH_COMMAND
+                  value: ssh -i /tf/.ssh/id -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new
+              resources:
+                # A `terraform plan` over one tf-common-module loads the AWS provider plugin
+                # (~1GB resident) on top of this pod's own ~1GB, and the plan is OOM-killed by
+                # the NODE before the container limit is reached: the Workspace then reports a
+                # Terraform error with an empty summary ("Summary: ."), the provider logs
+                # nothing at all, and the killed children pile up until the node reports
+                # ExcessiveZombieProcesses. The request, not the limit, is what makes EKS Auto
+                # Mode provision a node big enough — and it must hold the plan on top of
+                # whatever product pods share the node. 3Gi was not enough: Auto Mode placed the
+                # pod on an m5a.large (7.2Gi allocatable) already running tief and cms, leaving
+                # ~2.8Gi free, and every plan died.
+                requests:
+                  cpu: 500m
+                  memory: 6Gi
+                limits:
+                  cpu: "2"
+                  memory: 8Gi
+              volumeMounts:
+                - name: git-secret
+                  mountPath: /etc/git-secret
+                  readOnly: true
+                - name: workdir
+                  mountPath: /tf
+          volumes:
+            - name: git-secret
+              secret:
+                # kubectl create secret generic tf-modules-deploy-key -n crossplane-system \
+                #   --from-file=ssh=$HOME/.ssh/tf-common-modules-deploy-key
+                secretName: tf-modules-deploy-key
+                # Readable inside the pod only; the init container narrows the working copy.
+                defaultMode: 0444
+            - name: workdir
+              emptyDir:
+                sizeLimit: 4Gi
+---
+# Newer releases: https://github.com/crossplane-contrib/provider-terraform/releases
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-terraform
+spec:
+  package: xpkg.upbound.io/upbound/provider-terraform:v1.1.1
+  runtimeConfigRef:
+    name: terraform-runtime

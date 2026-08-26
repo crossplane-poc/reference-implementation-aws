@@ -1,0 +1,219 @@
+# The module HCL is inlined below; this file is the source of truth. It was originally
+# spliced together by a generator that is not part of this repository.
+# How a MessageQueue is built.
+#
+#   tf.m.upbound.io/Workspace       one sqs module call, plus one IAM policy and attachment per
+#                                   grantee
+#   ConfigMap <name>-connection     SQS_QUEUE_URL / _ARN, as the native MessageQueue
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: messagequeue.platform.prometeo.iag.ai
+  labels:
+    crossplane.io/xrd: messagequeues.platform.prometeo.iag.ai
+spec:
+  compositeTypeRef:
+    apiVersion: platform.prometeo.iag.ai/v1alpha1
+    kind: MessageQueue
+  mode: Pipeline
+  pipeline:
+    - step: environment
+      functionRef:
+        name: function-environment-configs
+      input:
+        apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+        kind: Input
+        spec:
+          environmentConfigs:
+            - type: Reference
+              ref:
+                name: prometeo-environment
+
+    - step: workspace
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            {{- $name := $xr.metadata.name -}}
+            {{- $ns := $xr.metadata.namespace -}}
+            {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
+
+            {{- $product := default $ns $spec.product -}}
+            {{- $modules := $spec.modules -}}
+            {{- $queue := default (printf "prometeo-%s-%s-%s" $env.environment $product $name) $spec.queueName -}}
+            {{- $workspace := printf "prometeo-%s-%s-%s" $env.environment $product $name -}}
+
+            {{- $vars := dict
+                  "account_id" $env.accountId
+                  "queue_name" $queue
+                  "visibility_timeout_seconds" $spec.visibilityTimeoutSeconds
+                  "create_dlq" $spec.deadLetter.enabled
+                  "max_receive_count" $spec.deadLetter.maxReceiveCount
+                  "access" $spec.access
+                  "tags" (merge (dict "Name" $queue "Product" $product "Component" $name) $env.tags) }}
+            ---
+            apiVersion: tf.m.upbound.io/v1beta1
+            kind: Workspace
+            metadata:
+              name: {{ $name }}
+              namespace: {{ $ns }}
+              annotations:
+                {{ setResourceNameAnnotation "workspace" }}
+                crossplane.io/external-name: {{ $workspace | quote }}
+            spec:
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: terraform
+              writeConnectionSecretToRef:
+                name: {{ $name }}-outputs
+              forProvider:
+                source: Inline
+                inlineFormat: HCL
+                enableTerraformCLILogging: true
+                varmap: {{ $vars | toJson }}
+                module: |
+                  locals {
+                    role_arns = [for s in var.access : "arn:aws:iam::${var.account_id}:role/${s}"]
+                  }
+
+                  module "queue" {
+                    source = "{{ $modules.source }}//modules/sqs?ref={{ $modules.version }}"
+
+                    queue_name                 = var.queue_name
+                    visibility_timeout_seconds = var.visibility_timeout_seconds
+                    create_dlq                 = var.create_dlq
+                    max_receive_count          = var.max_receive_count
+                    aws_account_id             = var.account_id
+                    kms_key_users              = local.role_arns
+                    tags                       = var.tags
+                  }
+
+                  resource "aws_iam_policy" "access" {
+                    for_each = toset(var.access)
+
+                    name        = "${var.queue_name}-${each.key}"
+                    description = "Send and receive on ${var.queue_name} for ${each.key}"
+
+                    policy = jsonencode({
+                      Version = "2012-10-17"
+                      Statement = [
+                        {
+                          Sid    = "QueueActions"
+                          Effect = "Allow"
+                          Action = [
+                            "sqs:SendMessage",
+                            "sqs:ReceiveMessage",
+                            "sqs:DeleteMessage",
+                            "sqs:ChangeMessageVisibility",
+                            "sqs:GetQueueAttributes",
+                            "sqs:GetQueueUrl",
+                          ]
+                          Resource = compact([module.queue.queue_arn, module.queue.dlq_arn])
+                        },
+                        {
+                          Sid      = "UseTheQueueKey"
+                          Effect   = "Allow"
+                          Action   = ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
+                          Resource = [module.queue.kms_key_arn]
+                        },
+                      ]
+                    })
+                  }
+
+                  resource "aws_iam_role_policy_attachment" "access" {
+                    for_each = toset(var.access)
+
+                    role       = each.key
+                    policy_arn = aws_iam_policy.access[each.key].arn
+                  }
+
+                  output "queue_url" {
+                    value = module.queue.queue_url
+                  }
+
+                  output "queue_arn" {
+                    value = module.queue.queue_arn
+                  }
+
+                  output "dlq_arn" {
+                    value = module.queue.dlq_arn
+                  }
+
+                  # One SQS queue (and its dead-letter queue) from tf-common-modules/sqs, plus one IAM policy per
+                  # service in spec.access.
+                  #
+                  # The `?ref=` in main.tf is rewritten from the XR's spec.modules when these files are spliced
+                  # into the composition (scripts/build.py); the literal is the default pin the tests run against.
+                  variable "account_id" { type = string }
+
+                  variable "queue_name" { type = string }
+
+                  variable "visibility_timeout_seconds" { type = number }
+
+                  variable "create_dlq" { type = bool }
+
+                  variable "max_receive_count" { type = number }
+
+                  variable "access" { type = list(string) }
+
+                  variable "tags" { type = map(string) }
+    - step: connection
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            {{- $name := $xr.metadata.name -}}
+            {{- $ns := $xr.metadata.namespace -}}
+            {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
+
+            {{- $product := default $ns $spec.product -}}
+            {{- $workspace := printf "prometeo-%s-%s-%s" $env.environment $product $name -}}
+            {{- $observed := default dict .observed.resources -}}
+            {{- $out := dig "status" "atProvider" "outputs" dict (dig "workspace" "resource" dict $observed) -}}
+
+            {{- $url := dig "queue_url" "" $out -}}
+            {{- $arn := dig "queue_arn" "" $out -}}
+            {{- $dlq := dig "dlq_arn" "" $out -}}
+            {{- $granteeCsv := join "," $spec.access }}
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: {{ $name }}-connection
+              namespace: {{ $ns }}
+              annotations:
+                {{ setResourceNameAnnotation "connection" }}
+                gotemplating.fn.crossplane.io/ready: "True"
+                {{- if $spec.access }}
+                reflector.v1.k8s.emberstack.com/reflection-allowed: "true"
+                reflector.v1.k8s.emberstack.com/reflection-allowed-namespaces: {{ $granteeCsv | quote }}
+                reflector.v1.k8s.emberstack.com/reflection-auto-enabled: "true"
+                reflector.v1.k8s.emberstack.com/reflection-auto-namespaces: {{ $granteeCsv | quote }}
+                {{- end }}
+            data:
+              SQS_QUEUE_URL: {{ $url | quote }}
+              SQS_QUEUE_ARN: {{ $arn | quote }}
+              SQS_DLQ_ARN: {{ $dlq | quote }}
+            ---
+            apiVersion: platform.prometeo.iag.ai/v1alpha1
+            kind: MessageQueue
+            status:
+              workspace: {{ $workspace | quote }}
+              queueUrl: {{ $url | quote }}
+              queueArn: {{ $arn | quote }}
+
+    - step: ready
+      functionRef:
+        name: function-auto-ready

@@ -1,0 +1,24 @@
+# Wave 0: the component catalog — one XRD and one Composition per tf-common-module.
+#
+# These are the kinds a product manifest uses. Each renders a Terraform root module into a
+# Workspace, which provider-terraform then applies; the composition translates camelCase spec
+# fields to snake_case module variables and does nothing else.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+commonAnnotations:
+  argocd.argoproj.io/sync-wave: "0"
+
+resources:
+  - product/definition.yaml
+  - product/composition.yaml
+  - app-service/definition.yaml
+  - app-service/composition.yaml
+  - postgres-database/definition.yaml
+  - postgres-database/composition.yaml
+  - object-store/definition.yaml
+  - object-store/composition.yaml
+  - key-value-table/definition.yaml
+  - key-value-table/composition.yaml
+  - message-queue/definition.yaml
+  - message-queue/composition.yaml

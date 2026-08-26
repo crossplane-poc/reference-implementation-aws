@@ -1,0 +1,232 @@
+# The module HCL is inlined below; this file is the source of truth. It was originally
+# spliced together by a generator that is not part of this repository.
+# How a PostgresDatabase is built.
+#
+#   tf.m.upbound.io/Workspace       one rds call and its state
+#   ConfigMap <name>-connection     DATABASE_HOST/PORT/NAME/USER, mirrored into the namespaces
+#                                   of the services in `access` by kubernetes-reflector
+#
+# The VPC and node security group come from the EnvironmentConfig rather than from another
+# workspace's outputs: they are facts about the cluster, and every component in both catalogs
+# reads them from the same place.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: postgresdatabase.platform.prometeo.iag.ai
+  labels:
+    crossplane.io/xrd: postgresdatabases.platform.prometeo.iag.ai
+spec:
+  compositeTypeRef:
+    apiVersion: platform.prometeo.iag.ai/v1alpha1
+    kind: PostgresDatabase
+  mode: Pipeline
+  pipeline:
+    - step: environment
+      functionRef:
+        name: function-environment-configs
+      input:
+        apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+        kind: Input
+        spec:
+          environmentConfigs:
+            - type: Reference
+              ref:
+                name: prometeo-environment
+
+    - step: workspace
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            {{- $name := $xr.metadata.name -}}
+            {{- $ns := $xr.metadata.namespace -}}
+            {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
+
+            {{- $product := default $ns $spec.product -}}
+            {{- $modules := $spec.modules -}}
+            {{- $defaults := $env.defaults.database -}}
+            {{- $workspace := printf "prometeo-%s-%s-db" $env.environment $product -}}
+
+            {{- /* "developer" is shorthand for the role bootstrap-product creates. Spelling it
+                   out here rather than in HCL keeps the module call plain. */ -}}
+            {{- $devRole := printf "%s-%s-developer" $product $spec.productFamily -}}
+            {{- $admins := list -}}
+            {{- range $r := $spec.adminAccess }}{{ if eq $r "developer" }}{{ $admins = append $admins $devRole }}{{ else }}{{ $admins = append $admins $r }}{{ end }}{{ end -}}
+            {{- $auth := concat $spec.access $admins -}}
+
+            {{- $vars := dict
+                  "environment" $env.environment
+                  "region" $env.region
+                  "product_family" $spec.productFamily
+                  "product_name" $product
+                  "database_name" (default (printf "%sdb" $product) $spec.databaseName)
+                  "username" $spec.username
+                  "engine_version" (default $defaults.engineVersion $spec.engineVersion)
+                  "family" $spec.family
+                  "min_acu" (default $defaults.minACU $spec.minACU)
+                  "max_acu" (default $defaults.maxACU $spec.maxACU)
+                  "instance_count" $spec.instanceCount
+                  "log_exports" $spec.logExports
+                  "iam_auth_roles" (uniq $auth)
+                  "iam_admin_roles" (uniq $admins)
+                  "k8s_access" $spec.k8sAccess
+                  "bootstrap_lambda" $spec.bootstrapLambda
+                  "vpc_id" $env.vpcId
+                  "node_security_group_id" $env.nodeSecurityGroupId }}
+            ---
+            apiVersion: tf.m.upbound.io/v1beta1
+            kind: Workspace
+            metadata:
+              name: {{ $name }}
+              namespace: {{ $ns }}
+              annotations:
+                {{ setResourceNameAnnotation "workspace" }}
+                crossplane.io/external-name: {{ $workspace | quote }}
+            spec:
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: terraform
+              writeConnectionSecretToRef:
+                name: {{ $name }}-outputs
+              forProvider:
+                source: Inline
+                inlineFormat: HCL
+                enableTerraformCLILogging: true
+                varmap: {{ $vars | toJson }}
+                module: |
+                  # One Aurora PostgreSQL cluster, from tf-common-modules/rds — the Terraform-path equivalent of
+                  # the native PostgresDatabase component.
+                  #
+                  # The `?ref=` below is rewritten from the XR's spec.modules when this file is spliced into the
+                  # composition (scripts/build.py). The literal is the default pin and what the tests run against.
+
+                  module "rds" {
+                    source = "{{ $modules.source }}//modules/rds?ref={{ $modules.version }}"
+
+                    product_family = var.product_family
+                    product_name   = var.product_name
+                    environment    = var.environment
+                    database_name  = var.database_name
+                    username       = var.username
+
+                    engine         = "aurora-postgresql"
+                    engine_version = var.engine_version
+                    family         = var.family
+
+                    instance_class = null
+                    serverless_v2_scaling_configuration = {
+                      min_capacity = var.min_acu
+                      max_capacity = var.max_acu
+                    }
+                    rds_cluster_instance_count = var.instance_count
+
+                    vpc_id                     = var.vpc_id
+                    eks_node_security_group_id = var.node_security_group_id
+
+                    iam_auth_role_names  = var.iam_auth_roles
+                    iam_admin_role_names = var.iam_admin_roles
+
+                    enabled_cloudwatch_logs_exports = var.log_exports
+                    enable_bootstrap_lambda         = var.bootstrap_lambda
+                    enable_rds_k8s_access           = var.k8s_access
+                  }
+
+                  # Everything the composition republishes: the connection ConfigMap other components mount, and
+                  # the XR's own status. Only what cannot be derived from a name belongs here.
+
+                  output "database_host" {
+                    value = module.rds.cluster_endpoint
+                  }
+
+                  output "database_port" {
+                    value = tostring(module.rds.cluster_port)
+                  }
+
+                  output "database_name" {
+                    value = module.rds.cluster_database_name
+                  }
+
+                  variable "environment" { type = string }
+                  variable "region" { type = string }
+                  variable "product_family" { type = string }
+                  variable "product_name" { type = string }
+                  variable "database_name" { type = string }
+                  variable "username" { type = string }
+                  variable "engine_version" { type = string }
+                  variable "family" { type = string }
+                  variable "min_acu" { type = number }
+                  variable "max_acu" { type = number }
+                  variable "instance_count" { type = number }
+                  variable "log_exports" { type = list(string) }
+                  variable "iam_auth_roles" { type = list(string) }
+                  variable "iam_admin_roles" { type = list(string) }
+                  variable "k8s_access" { type = bool }
+                  variable "bootstrap_lambda" { type = bool }
+                  variable "vpc_id" { type = string }
+                  variable "node_security_group_id" { type = string }
+    - step: connection
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            {{- $name := $xr.metadata.name -}}
+            {{- $ns := $xr.metadata.namespace -}}
+            {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
+
+            {{- $product := default $ns $spec.product -}}
+            {{- $workspace := printf "prometeo-%s-%s-db" $env.environment $product -}}
+            {{- $observed := default dict .observed.resources -}}
+            {{- $out := dig "status" "atProvider" "outputs" dict (dig "workspace" "resource" dict $observed) -}}
+
+            {{- $host := dig "database_host" "" $out -}}
+            {{- $port := dig "database_port" "5432" $out -}}
+            {{- $dbname := dig "database_name" "" $out -}}
+
+            {{- /* bootstrap-service names each service's namespace after the service, so the
+                   grantee namespaces are exactly the `access` list. */ -}}
+            {{- $granteeCsv := join "," $spec.access }}
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: {{ $name }}-connection
+              namespace: {{ $ns }}
+              annotations:
+                {{ setResourceNameAnnotation "connection" }}
+                gotemplating.fn.crossplane.io/ready: "True"
+                {{- if $spec.access }}
+                reflector.v1.k8s.emberstack.com/reflection-allowed: "true"
+                reflector.v1.k8s.emberstack.com/reflection-allowed-namespaces: {{ $granteeCsv | quote }}
+                reflector.v1.k8s.emberstack.com/reflection-auto-enabled: "true"
+                reflector.v1.k8s.emberstack.com/reflection-auto-namespaces: {{ $granteeCsv | quote }}
+                {{- end }}
+            data:
+              DATABASE_HOST: {{ $host | quote }}
+              DATABASE_PORT: {{ $port | quote }}
+              DATABASE_NAME: {{ $dbname | quote }}
+              {{- /* Created by the rds module's bootstrap Lambda, not by this component. */}}
+              DATABASE_USER: iam_user
+              DATABASE_MIGRATION_USER: iam_migration_user
+            ---
+            apiVersion: platform.prometeo.iag.ai/v1alpha1
+            kind: PostgresDatabase
+            status:
+              workspace: {{ $workspace | quote }}
+              host: {{ $host | quote }}
+              databaseName: {{ $dbname | quote }}
+
+    - step: ready
+      functionRef:
+        name: function-auto-ready

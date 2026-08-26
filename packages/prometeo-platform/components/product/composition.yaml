@@ -1,0 +1,342 @@
+# The module HCL is inlined below; this file is the source of truth. It was originally
+# spliced together by a generator that is not part of this repository.
+# How a Product is built.
+#
+#   tf.m.upbound.io/Workspace       one bootstrap-product call and its state
+#   ConfigMap <name>-connection     the outputs other components and humans need
+#
+# Providers, aliases and the state backend come from the ClusterProviderConfig, not from here.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: product.platform.prometeo.iag.ai
+  labels:
+    crossplane.io/xrd: products.platform.prometeo.iag.ai
+spec:
+  compositeTypeRef:
+    apiVersion: platform.prometeo.iag.ai/v1alpha1
+    kind: Product
+  mode: Pipeline
+  pipeline:
+    - step: environment
+      functionRef:
+        name: function-environment-configs
+      input:
+        apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+        kind: Input
+        spec:
+          environmentConfigs:
+            - type: Reference
+              ref:
+                name: prometeo-environment
+
+    - step: workspace
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            {{- $name := $xr.metadata.name -}}
+            {{- $ns := $xr.metadata.namespace -}}
+            {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
+
+            {{- $product := default $ns $spec.product -}}
+            {{- $modules := $spec.modules -}}
+            {{- $sso := $spec.sso -}}
+            {{- $airflow := $spec.airflow -}}
+            {{- $workspace := printf "prometeo-%s-%s-product" $env.environment $product -}}
+
+            {{- $vars := dict
+                  "environment" $env.environment
+                  "region" $env.region
+                  "account_id" $env.accountId
+                  "product_family" $spec.productFamily
+                  "product_name" $product
+                  "enable_developer_role" $spec.developerRole.enabled
+                  "enable_developer_bedrock" $spec.developerRole.bedrock
+                  "sso_cognito_domain" (default $env.cognito.domain $sso.cognitoDomain)
+                  "vpc_origin_id" (default "" $env.cloudfront.vpcOriginId)
+                  "airflow" (dict
+                    "enabled" $airflow.enabled
+                    "github_repos" $airflow.githubRepos
+                    "bedrock_from_service" $airflow.bedrockFromService
+                    "database" $airflow.database) -}}
+
+            {{- /* Where the Cognito client id comes from, in precedence order: a Secret in
+                   this namespace, a literal on the XR, or — the normal case — the SSM parameter
+                   the SSO account publishes, read by the apply itself. */ -}}
+            {{- $clientIdRef := $sso.clientIdSecretRef -}}
+            {{- $clientIdParam := "" -}}
+            {{- if not $clientIdRef -}}
+            {{- $vars = set $vars "sso_client_id" (default "" $sso.clientId) -}}
+            {{- if not $sso.clientId -}}
+            {{- $clientIdParam = default (printf "/prometeo/%s/%s/sso-client-id" $env.environment $product) $sso.clientIdParameter -}}
+            {{- end -}}
+            {{- end -}}
+            {{- $clientIdRoleArn := "" -}}
+            {{- if $clientIdParam -}}
+            {{- $clientIdRoleArn = default "" $env.cognito.clientIdAssumeRoleArn -}}
+            {{- $vars = set $vars "sso_client_id_parameter" $clientIdParam -}}
+            {{- $vars = set $vars "sso_client_id_parameter_region" (default $env.region $sso.parameterRegion) -}}
+            {{- $vars = set $vars "sso_client_id_assume_role_arn" $clientIdRoleArn -}}
+            {{- end }}
+            ---
+            apiVersion: tf.m.upbound.io/v1beta1
+            kind: Workspace
+            metadata:
+              name: {{ $name }}
+              namespace: {{ $ns }}
+              annotations:
+                {{ setResourceNameAnnotation "workspace" }}
+                crossplane.io/external-name: {{ $workspace | quote }}
+            spec:
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: terraform
+              writeConnectionSecretToRef:
+                name: {{ $name }}-outputs
+              forProvider:
+                source: Inline
+                inlineFormat: HCL
+                enableTerraformCLILogging: true
+                varmap: {{ $vars | toJson }}
+                {{- if or $clientIdRef $airflow.databaseConnection }}
+                env:
+                {{- if $clientIdRef }}
+                  - name: TF_VAR_sso_client_id
+                    secretKeyRef:
+                      name: {{ $clientIdRef.name | quote }}
+                      key: {{ $clientIdRef.key | quote }}
+                {{- end }}
+                {{- if $airflow.databaseConnection }}
+                  {{- /* The database's endpoint is not knowable from a name, so it arrives the
+                         way the native components pass connection details: through the
+                         ConfigMap the datastore published. */}}
+                  - name: TF_VAR_airflow_rds_endpoint
+                    configMapKeyRef:
+                      name: {{ $airflow.databaseConnection | quote }}
+                      key: DATABASE_HOST
+                {{- end }}
+                {{- end }}
+                module: |
+                  locals {
+                    # A Cognito public client id is not a secret — the parameter is a plain String — but the data
+                    # source marks every value sensitive, and a sensitive value cannot reach the module's
+                    # templatefile() calls.
+                    sso_client_id = (
+                      var.sso_client_id_parameter != ""
+                      ? nonsensitive(data.aws_ssm_parameter.sso_client_id[0].value)
+                      : var.sso_client_id
+                    )
+
+                    # Both policies are named deterministically by the modules that create them — bootstrap-service's
+                    # `<service>-bedrock-access` and rds's `<product>-rds-iam-auth` — so this component grants
+                    # Airflow access to them without reading another workspace's state. It does mean the other
+                    # component must have applied first; until then this apply fails and retries.
+                    bedrock_policy_arn = var.airflow.bedrock_from_service != "" ? (
+                      "arn:aws:iam::${var.account_id}:policy/${var.airflow.bedrock_from_service}-bedrock-access"
+                    ) : null
+                    rds_auth_policy_arn = var.airflow.database ? (
+                      "arn:aws:iam::${var.account_id}:policy/${var.product_name}-rds-iam-auth"
+                    ) : null
+                  }
+
+                  module "product" {
+                    source = "{{ $modules.source }}//modules/bootstrap-product?ref={{ $modules.version }}"
+
+                    providers = {
+                      aws           = aws
+                      aws.us_east_1 = aws.us_east_1
+                    }
+
+                    product_family = var.product_family
+                    product_name   = var.product_name
+                    environment    = var.environment
+                    region         = var.region
+
+                    enable_product_developer_role = var.enable_developer_role
+                    enable_developer_bedrock      = var.enable_developer_bedrock
+
+                    vpc_origin_id      = var.vpc_origin_id
+                    sso_cognito_domain = var.sso_cognito_domain
+                    sso_client_id      = local.sso_client_id
+                    enable_sso_waf     = true
+
+                    airflow_enabled                 = var.airflow.enabled
+                    airflow_github_repo_names       = var.airflow.enabled ? var.airflow.github_repos : null
+                    airflow_enable_bedrock          = var.airflow.bedrock_from_service != ""
+                    airflow_bedrock_policy_arn      = local.bedrock_policy_arn
+                    airflow_rds_iam_auth_policy_arn = local.rds_auth_policy_arn
+                    airflow_rds_endpoint            = var.airflow_rds_endpoint != "" ? var.airflow_rds_endpoint : null
+                  }
+
+                  output "product_domain" {
+                    value = module.product.product_domain
+                  }
+
+                  output "product_developer_role_path" {
+                    value = module.product.product_developer_role_path
+                  }
+
+                  output "route53_zone_id" {
+                    value = module.product.route53_zone_id
+                  }
+
+                  # Not constructible from a name — a AppService that turns on SSO reads it out of the
+                  # connection ConfigMap the composition publishes from this output.
+                  output "sso_web_acl_arn" {
+                    value = module.product.sso_web_acl_arn
+                  }
+
+                  output "airflow_etls_bucket_name" {
+                    value = module.product.airflow_etls_bucket_name
+                  }
+
+                  # Reading the Cognito client id out of SSM, in the account that owns Cognito.
+                  #
+                  # This used to be a Go-template conditional around the whole file, which is why the module could
+                  # not be checked by anything that understands Terraform. The gate is now the ordinary one: the
+                  # data source counts itself out when no parameter is named, and the provider only assumes a role
+                  # when an ARN is given.
+
+                  # Cognito is in another account, so this alias assumes the reader role that account publishes.
+                  # With no ARN it is this account, possibly another region.
+                  provider "aws" {
+                    alias  = "sso_client_id"
+                    region = var.sso_client_id_parameter_region != "" ? var.sso_client_id_parameter_region : var.region
+
+                    # The provider validates its credentials with sts:GetCallerIdentity before the first read.
+                    # Inside the VPC that call goes through the STS interface endpoint, whose policy only allows
+                    # principals of the workload account, so for the cross-account reader role it fails with "no
+                    # VPC endpoint policy allows the sts:GetCallerIdentity action". Nothing here needs the caller
+                    # identity — only one ssm:GetParameter, which the SSM endpoint policy does allow for that role.
+                    skip_credentials_validation = true
+                    skip_requesting_account_id  = true
+
+                    dynamic "assume_role" {
+                      for_each = var.sso_client_id_assume_role_arn != "" ? [var.sso_client_id_assume_role_arn] : []
+
+                      content {
+                        role_arn     = assume_role.value
+                        session_name = "prometeo-${var.environment}-${var.product_name}-product"
+                      }
+                    }
+                  }
+
+                  data "aws_ssm_parameter" "sso_client_id" {
+                    count = var.sso_client_id_parameter != "" ? 1 : 0
+
+                    provider = aws.sso_client_id
+                    name     = var.sso_client_id_parameter
+                  }
+
+                  # One product from tf-common-modules/bootstrap-product: DNS, the developer role, the SSO WebACL
+                  # and the Airflow client.
+                  #
+                  # The `?ref=` in main.tf is rewritten from the XR's spec.modules when these files are spliced
+                  # into the composition (scripts/build.py); the literal is the default pin the tests run against.
+
+                  variable "environment" { type = string }
+                  variable "region" { type = string }
+                  variable "account_id" { type = string }
+                  variable "product_family" { type = string }
+                  variable "product_name" { type = string }
+                  variable "enable_developer_role" { type = bool }
+                  variable "enable_developer_bedrock" { type = bool }
+                  variable "sso_cognito_domain" { type = string }
+                  variable "vpc_origin_id" { type = string }
+
+                  # The client id reaches this workspace one of two ways: spec.sso.clientId (or a Secret) arrives
+                  # as a plain value here, or spec.sso.clientIdParameter names an SSM parameter that the apply
+                  # itself reads — see sso-client-id.tf. Exactly one of the two is ever non-empty.
+                  variable "sso_client_id" {
+                    type    = string
+                    default = ""
+                  }
+
+                  variable "sso_client_id_parameter" {
+                    type    = string
+                    default = ""
+                  }
+
+                  variable "sso_client_id_parameter_region" {
+                    type    = string
+                    default = ""
+                  }
+
+                  variable "sso_client_id_assume_role_arn" {
+                    type    = string
+                    default = ""
+                  }
+
+                  # Empty unless spec.airflow.databaseConnection named a ConfigMap.
+                  variable "airflow_rds_endpoint" {
+                    type    = string
+                    default = ""
+                  }
+
+                  variable "airflow" {
+                    type = object({
+                      enabled              = bool
+                      github_repos         = list(string)
+                      bedrock_from_service = string
+                      database             = bool
+                    })
+                  }
+    - step: connection
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            {{- $name := $xr.metadata.name -}}
+            {{- $ns := $xr.metadata.namespace -}}
+            {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
+
+            {{- $product := default $ns $spec.product -}}
+            {{- $workspace := printf "prometeo-%s-%s-product" $env.environment $product -}}
+
+            {{- $observed := default dict .observed.resources -}}
+            {{- $out := dig "status" "atProvider" "outputs" dict (dig "workspace" "resource" dict $observed) -}}
+
+            {{- $domain := dig "product_domain" "" $out -}}
+            {{- $rolePath := dig "product_developer_role_path" "" $out -}}
+            {{- $zoneId := dig "route53_zone_id" "" $out -}}
+            {{- $wafArn := dig "sso_web_acl_arn" "" $out -}}
+            {{- $etls := dig "airflow_etls_bucket_name" "" $out }}
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: {{ $name }}-connection
+              namespace: {{ $ns }}
+              annotations:
+                {{ setResourceNameAnnotation "connection" }}
+                gotemplating.fn.crossplane.io/ready: "True"
+            data:
+              PRODUCT_DOMAIN: {{ $domain | quote }}
+              PRODUCT_DEVELOPER_ROLE_PATH: {{ $rolePath | quote }}
+              ROUTE53_ZONE_ID: {{ $zoneId | quote }}
+              SSO_WEB_ACL_ARN: {{ $wafArn | quote }}
+              AIRFLOW_ETLS_BUCKET: {{ $etls | quote }}
+            ---
+            apiVersion: platform.prometeo.iag.ai/v1alpha1
+            kind: Product
+            status:
+              workspace: {{ $workspace | quote }}
+              productDomain: {{ $domain | quote }}
+              developerRolePath: {{ $rolePath | quote }}
+
+    - step: ready
+      functionRef:
+        name: function-auto-ready

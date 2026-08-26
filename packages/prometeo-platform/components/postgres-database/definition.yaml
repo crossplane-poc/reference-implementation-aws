@@ -1,0 +1,108 @@
+# PostgresDatabase — an Aurora PostgreSQL cluster, from tf-common-modules/rds.
+#
+# Serverless v2, IAM authentication, its own KMS key and security group, and the bootstrap
+# Lambda that creates `iam_user` / `iam_migration_user`. The native equivalent is
+# `PostgresDatabase`, and this publishes the same connection ConfigMap keys, so a service cannot
+# tell which of the two created its database.
+#
+# Terraform equivalent: the `module "rds"` block in modules/products/<product>/rds.tf.
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: postgresdatabases.platform.prometeo.iag.ai
+spec:
+  scope: Namespaced
+  group: platform.prometeo.iag.ai
+  names:
+    kind: PostgresDatabase
+    plural: postgresdatabases
+    shortNames:
+      - pgdb
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                product:
+                  type: string
+                  description: Defaults to the XR's namespace. Also names the cluster, `<product>-<region>-db`.
+                productFamily:
+                  type: string
+                  default: ims
+                modules:
+                  type: object
+                  properties:
+                    source:
+                      type: string
+                      default: git::ssh://git@github.com/IAGAI/tf-common-modules.git
+                    version:
+                      type: string
+                      default: v6.5.1
+                  default: {}
+                databaseName:
+                  type: string
+                  description: Defaults to `<product>db`.
+                username:
+                  type: string
+                  default: postgres
+                engineVersion:
+                  type: string
+                  description: Defaults to the environment's defaults.database.engineVersion.
+                family:
+                  type: string
+                  default: aurora-postgresql16
+                minACU:
+                  type: number
+                  description: Defaults to the environment's defaults.database.minACU.
+                maxACU:
+                  type: number
+                  description: Defaults to the environment's defaults.database.maxACU.
+                instanceCount:
+                  type: integer
+                  description: 1 for a single writer, 2 to add a reader.
+                  default: 1
+                logExports:
+                  type: array
+                  items:
+                    type: string
+                  default: [postgresql]
+                access:
+                  type: array
+                  description: >-
+                    Services granted `rds-db:connect`. The IAM role bootstrap-service creates is
+                    named after the service, so this is a name, not a reference — the same
+                    convention the native components use.
+                  items:
+                    type: string
+                  default: []
+                adminAccess:
+                  type: array
+                  description: >-
+                    IAM role names granted the admin database user. `developer` is expanded to
+                    the product developer role, `<product>-<family>-developer`.
+                  items:
+                    type: string
+                  default: [developer]
+                k8sAccess:
+                  type: boolean
+                  description: HAProxy in a `<product>-db-ops` namespace, for port-forwarding from a laptop.
+                  default: true
+                bootstrapLambda:
+                  type: boolean
+                  description: The Lambda that creates the IAM-auth database users on first apply.
+                  default: true
+            status:
+              type: object
+              properties:
+                workspace:
+                  type: string
+                host:
+                  type: string
+                databaseName:
+                  type: string
