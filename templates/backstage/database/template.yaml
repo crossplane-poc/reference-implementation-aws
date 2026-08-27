@@ -73,7 +73,7 @@ spec:
       action: roadiehq:utils:fs:write
       input:
         path: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ parameters.name }}.yaml
-        content: |
+        content: |-
           apiVersion: platform.prometeo.iag.ai/v1alpha1
           kind: PostgresDatabase
           metadata:
@@ -93,19 +93,19 @@ spec:
             # separate field on the XRD, so picking 18.4 while family stayed at
             # aurora-postgresql16 would fail the apply. Spelled out rather than derived by
             # string-splitting, which the scaffolder's sandbox may not allow.
-          {% if parameters.engineVersion == "18.4" %}
+          {%- if parameters.engineVersion == "18.4" %}
             family: aurora-postgresql18
-          {% elif parameters.engineVersion == "17.10" %}
+          {%- elif parameters.engineVersion == "17.10" %}
             family: aurora-postgresql17
-          {% else %}
+          {%- else %}
             family: aurora-postgresql16
-          {% endif %}
-          {% if parameters.access and parameters.access | length %}
+          {%- endif %}
+          {%- if parameters.access and parameters.access | length %}
             access:
-          {% for a in parameters.access %}
+          {%- for a in parameters.access %}
               - ${{ a | parseEntityRef | pick('name') }}
-          {% endfor %}
-          {% endif %}
+          {%- endfor %}
+          {%- endif %}
             # Both on by every time: port-forward access from a laptop, and the Lambda that
             # creates the IAM-auth users an application logs in as. Neither is a decision worth
             # putting in front of whoever is creating a database.
@@ -117,7 +117,7 @@ spec:
       action: roadiehq:utils:fs:write
       input:
         path: products/${{ parameters.product | parseEntityRef | pick('name') }}/components/${{ parameters.name }}.yaml
-        content: |
+        content: |-
           apiVersion: backstage.io/v1alpha1
           kind: Resource
           metadata:

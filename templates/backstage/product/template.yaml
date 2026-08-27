@@ -59,7 +59,7 @@ spec:
       action: roadiehq:utils:fs:write
       input:
         path: products/${{ parameters.name }}/base/namespace.yaml
-        content: |
+        content: |-
           # One namespace for the whole product, not one per service. The pods and their own
           # namespaces are created by Terraform inside the workspaces, so this namespace holds
           # control-plane objects only: the product's XRs, their Workspaces, and the ConfigMaps
@@ -78,7 +78,7 @@ spec:
       action: roadiehq:utils:fs:write
       input:
         path: products/${{ parameters.name }}/base/product.yaml
-        content: |
+        content: |-
           apiVersion: platform.prometeo.iag.ai/v1alpha1
           kind: Product
           metadata:
@@ -94,16 +94,16 @@ spec:
             developerRole:
               enabled: ${{ parameters.developerRole }}
               bedrock: ${{ parameters.developerBedrock }}
-          {% if parameters.airflowEnabled %}
+          {%- if parameters.airflowEnabled %}
             airflow:
               enabled: true
-          {% if parameters.airflowRepos and parameters.airflowRepos | length %}
+          {%- if parameters.airflowRepos and parameters.airflowRepos | length %}
               githubRepos:
-          {% for r in parameters.airflowRepos %}
+          {%- for r in parameters.airflowRepos %}
                 - ${{ r | dump }}
-          {% endfor %}
-          {% endif %}
-          {% endif %}
+          {%- endfor %}
+          {%- endif %}
+          {%- endif %}
             # The SSO login gate. Its Cognito client id is read from SSM during the apply,
             # through the environment's cross-account reader role, so there is nothing to set
             # and nothing to ask for. An environment that cannot do that read sets
@@ -115,7 +115,7 @@ spec:
       action: roadiehq:utils:fs:write
       input:
         path: products/${{ parameters.name }}/catalog-info.yaml
-        content: |
+        content: |-
           apiVersion: backstage.io/v1alpha1
           kind: System
           metadata:
