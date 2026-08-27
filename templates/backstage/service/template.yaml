@@ -446,7 +446,7 @@ spec:
       # A text blob rather than a second link, because a link's url has minLength: 1 in the
       # scaffolder's own schema — there is no way to render one only for a frontend. This says
       # something useful either way.
-      - title: Where it will answer
+      - title: How to access the service
         content: |
           {% if parameters.frontend %}
           **https://${{ parameters.product | parseEntityRef | pick('name') }}.sb3.ims.iag.ai**
