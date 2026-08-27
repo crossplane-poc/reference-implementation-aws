@@ -218,7 +218,11 @@ spec:
       action: http:backstage:request
       input:
         method: GET
-        path: /api/catalog/entities?filter=kind=component,spec.system=${{ parameters.product | parseEntityRef | pick('name') }}&fields=metadata.name,metadata.annotations
+        # Plugin-relative, not the browser URL. This action reads the first path segment as a
+        # plugin id and asks discovery where that plugin lives, so "/api/catalog/..." resolves
+        # plugin "api" and requests <backend>/api/api/catalog/... -- a 404 with an empty body,
+        # which is what both earlier attempts hit. "/catalog/..." resolves plugin "catalog".
+        path: /catalog/entities?filter=kind=component,spec.system=${{ parameters.product | parseEntityRef | pick('name') }}&fields=metadata.name,metadata.annotations
 
     - id: resolve-allow-to
       name: Pair each chosen service with its port
@@ -227,9 +231,8 @@ spec:
         data:
           picked: ${{ parameters.allowTo }}
           catalog: ${{ steps['fetch-peer-ports'].output.body }}
-        # /api/catalog/entities returns a bare array; /entities/by-query returns { items }.
-        # by-query 404s on this build, so the classic endpoint is what is called -- and the
-        # expression accepts either shape so a later Backstage cannot quietly break it.
+        # /catalog/entities returns a bare array; /catalog/entities/by-query returns { items }.
+        # The expression accepts either shape so a later Backstage cannot quietly break it.
         #
         # $$ is the root: inside picked.(...) the context is the row, so the catalog has to be
         # reached from the top or every lookup silently misses and every port comes back as
