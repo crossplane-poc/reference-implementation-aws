@@ -372,11 +372,11 @@ spec:
       action: roadiehq:utils:fs:replace
       input:
         files:
-          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
             find: '\n  access:\n'
             replaceWith: "\n  access:\n    - ${{ parameters.name }}\n"
-          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value.service | parseEntityRef | pick('name') }}.yaml
+          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ each.value | parseEntityRef | pick('name') }}.yaml
             matchRegex: true
             find: '\nspec:(?![\s\S]*\n  access:)'
             replaceWith: "\nspec:\n  access:\n    - ${{ parameters.name }}"
