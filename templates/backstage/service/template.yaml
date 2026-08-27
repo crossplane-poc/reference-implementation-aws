@@ -218,7 +218,7 @@ spec:
       action: http:backstage:request
       input:
         method: GET
-        path: /api/catalog/entities/by-query?filter=kind=component,spec.system=${{ parameters.product | parseEntityRef | pick('name') }}&fields=metadata.name,metadata.annotations
+        path: /api/catalog/entities?filter=kind=component,spec.system=${{ parameters.product | parseEntityRef | pick('name') }}&fields=metadata.name,metadata.annotations
 
     - id: resolve-allow-to
       name: Pair each chosen service with its port
@@ -227,21 +227,28 @@ spec:
         data:
           picked: ${{ parameters.allowTo }}
           catalog: ${{ steps['fetch-peer-ports'].output.body }}
-        # $$ is the root: inside picked.(...) the context is the reference string, so the
-        # catalog has to be reached from the top or every lookup silently misses and every
-        # port comes back as the fallback.
+        # /api/catalog/entities returns a bare array; /entities/by-query returns { items }.
+        # by-query 404s on this build, so the classic endpoint is what is called -- and the
+        # expression accepts either shape so a later Backstage cannot quietly break it.
+        #
+        # $$ is the root: inside picked.(...) the context is the row, so the catalog has to be
+        # reached from the top or every lookup silently misses and every port comes back as
+        # the fallback.
         #
         # 8000 is that fallback, for a service whose entity predates this annotation. It is a
         # guess, and a wrong one for a frontend -- the pull request shows the port, so it can
         # be corrected there.
         expression: |
-          picked.(
-            $name := $split(service, "/")[-1];
-            $ann := $$.catalog.items[metadata.name = $name].metadata.annotations.`iag.ai/container-port`;
-            {
-              "service": $name,
-              "port": $number($ann ? $ann : "8000")
-            }
+          (
+            $list := $exists($$.catalog.items) ? $$.catalog.items : $$.catalog;
+            picked.(
+              $name := $split(service, "/")[-1];
+              $ann := $list[metadata.name = $name].metadata.annotations.`iag.ai/container-port`;
+              {
+                "service": $name,
+                "port": $number($ann ? $ann : "8000")
+              }
+            )
           )
 
     - id: write-component
