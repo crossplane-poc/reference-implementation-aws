@@ -266,8 +266,8 @@ spec:
       action: roadiehq:utils:fs:write
       input:
         path: products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ parameters.name }}.yaml
-        content: |
-          {% set resolvedAllowTo = steps['resolve-allow-to'].output.result %}
+        content: |-
+          {%- set resolvedAllowTo = steps['resolve-allow-to'].output.result -%}
           apiVersion: platform.prometeo.iag.ai/v1alpha1
           kind: AppService
           metadata:
@@ -284,13 +284,13 @@ spec:
               version: ital-1901-add-sb3-environment
             bedrock: ${{ parameters.bedrock }}
             langfuse: ${{ parameters.langfuse }}
-          {% if parameters.database and parameters.database.needed and parameters.database.component %}
+          {%- if parameters.database and parameters.database.needed and parameters.database.component %}
             database:
               enabled: true
               # Where the database publishes its address. Derived from the component you picked.
               connection: ${{ ((parameters.database.component | parseEntityRef | pick('name')) + '-connection') | dump }}
-          {% endif %}
-          {% if parameters.frontend %}
+          {%- endif %}
+          {%- if parameters.frontend %}
             ingress:
               enabled: true
               # Host defaults to <product>.<environment domain>.
@@ -298,35 +298,35 @@ spec:
               enabled: true
               # Where the product publishes its SSO WebACL. Derived from the product.
               productConnection: ${{ ((parameters.product | parseEntityRef | pick('name')) + '-connection') | dump }}
-          {% endif %}
-          {% if (parameters.allowFrom and parameters.allowFrom | length) or (resolvedAllowTo and resolvedAllowTo | length) or (parameters.egressDomains and parameters.egressDomains | length) %}
+          {%- endif %}
+          {%- if (parameters.allowFrom and parameters.allowFrom | length) or (resolvedAllowTo and resolvedAllowTo | length) or (parameters.egressDomains and parameters.egressDomains | length) %}
             network:
-          {% if parameters.allowFrom and parameters.allowFrom | length %}
+          {%- if parameters.allowFrom and parameters.allowFrom | length %}
               allowFrom:
-          {% for r in parameters.allowFrom %}
+          {%- for r in parameters.allowFrom %}
                 - { service: ${{ r.service | parseEntityRef | pick('name') }}, port: ${{ parameters.containerPort }} }
-          {% endfor %}
-          {% endif %}
-          {% if resolvedAllowTo and resolvedAllowTo | length %}
+          {%- endfor %}
+          {%- endif %}
+          {%- if resolvedAllowTo and resolvedAllowTo | length %}
               allowTo:
-          {% for r in resolvedAllowTo %}
+          {%- for r in resolvedAllowTo %}
                 - { service: ${{ r.service }}, port: ${{ r.port }} }
-          {% endfor %}
-          {% endif %}
-          {% if parameters.egressDomains and parameters.egressDomains | length %}
+          {%- endfor %}
+          {%- endif %}
+          {%- if parameters.egressDomains and parameters.egressDomains | length %}
               egressDomains:
-          {% for d in parameters.egressDomains %}
+          {%- for d in parameters.egressDomains %}
                 - ${{ d | dump }}
-          {% endfor %}
-          {% endif %}
-          {% endif %}
+          {%- endfor %}
+          {%- endif %}
+          {%- endif %}
 
     - id: write-catalog-info
       name: Write the catalog entry
       action: roadiehq:utils:fs:write
       input:
         path: products/${{ parameters.product | parseEntityRef | pick('name') }}/components/${{ parameters.name }}.yaml
-        content: |
+        content: |-
           apiVersion: backstage.io/v1alpha1
           kind: Component
           metadata:
@@ -343,15 +343,15 @@ spec:
             lifecycle: experimental
             owner: guests
             system: ${{ parameters.product | parseEntityRef | pick('name') }}
-          {% if (parameters.database and parameters.database.needed and parameters.database.component) or (parameters.buckets and parameters.buckets.needed and parameters.buckets.components and parameters.buckets.components | length) %}
+          {%- if (parameters.database and parameters.database.needed and parameters.database.component) or (parameters.buckets and parameters.buckets.needed and parameters.buckets.components and parameters.buckets.components | length) %}
             dependsOn:
-          {% if parameters.database and parameters.database.needed and parameters.database.component %}
+          {%- if parameters.database and parameters.database.needed and parameters.database.component %}
               - ${{ ('resource:default/' + (parameters.database.component | parseEntityRef | pick('name'))) | dump }}
-          {% endif %}
-          {% for b in (parameters.buckets.components if (parameters.buckets and parameters.buckets.needed) else []) %}
+          {%- endif %}
+          {%- for b in (parameters.buckets.components if (parameters.buckets and parameters.buckets.needed) else []) %}
               - ${{ ('resource:default/' + (b.bucket | parseEntityRef | pick('name'))) | dump }}
-          {% endfor %}
-          {% endif %}
+          {%- endfor %}
+          {%- endif %}
 
     # Grant this service access on each bucket it uses. Two anchors: the bucket already lists
     # some services, or it lists none at all. fs:replace builds new RegExp(find, 'g') -- no /m,
@@ -447,16 +447,16 @@ spec:
       # scaffolder's own schema — there is no way to render one only for a frontend. This says
       # something useful either way.
       - title: How to access the service
-        content: |
-          {% if parameters.frontend %}
+        content: |-
+          {%- if parameters.frontend %}
           **https://${{ parameters.product | parseEntityRef | pick('name') }}.sb3.ims.iag.ai**
 
           Live once the pull request is merged and the product is synced. The address belongs to
           the product, so a second frontend in the same product needs `spec.ingress.host` set to
           something else.
-          {% else %}
+          {%- else %}
           Reachable only from inside the cluster, at
           `${{ parameters.name }}.${{ parameters.name }}.svc.cluster.local:${{ parameters.containerPort }}`.
           Nothing outside the VPC can reach it. Re-run this template with "is this a frontend?"
           ticked to publish it.
-          {% endif %}
+          {%- endif %}
