@@ -234,6 +234,13 @@ spec:
         # /catalog/entities returns a bare array; /catalog/entities/by-query returns { items }.
         # The expression accepts either shape so a later Backstage cannot quietly break it.
         #
+        # The [ ... ] around the whole thing forces an array. Without it JSONata returns a bare
+        # object when exactly one service is picked and nothing at all when none is, and the
+        # step that consumes this iterates whatever it gets: given {service, port} it walks the
+        # object's entries, so `each` yields {"key":"service","value":"frontend"} and the file
+        # path renders as base/.yaml. Two or more picks return an array and work, which is why
+        # this only broke on a single one.
+        #
         # $$ is the root: inside picked.(...) the context is the row, so the catalog has to be
         # reached from the top or every lookup silently misses and every port comes back as
         # the fallback.
@@ -244,14 +251,14 @@ spec:
         expression: |
           (
             $list := $exists($$.catalog.items) ? $$.catalog.items : $$.catalog;
-            picked.(
+            [ picked.(
               $name := $split(service, "/")[-1];
               $ann := $list[metadata.name = $name].metadata.annotations.`iag.ai/container-port`;
               {
                 "service": $name,
                 "port": $number($ann ? $ann : "8000")
               }
-            )
+            ) ]
           )
 
     - id: write-component
