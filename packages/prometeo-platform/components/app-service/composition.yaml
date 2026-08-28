@@ -78,7 +78,22 @@ spec:
                   "egress_domains" $net.egressDomains
                   "egress_to" $net.allowTo
                   "ingress_from" $net.allowFrom
-                  "vpa_min_allowed" $spec.vpaMinAllowed -}}
+                  "vpa_min_allowed" $spec.vpaMinAllowed
+                  "workload_envs" (default dict $spec.env)
+                  "workload_probe_path" $spec.probePath
+                  "replicas" (default $env.defaults.replicas $spec.replicas) -}}
+
+            {{- /* The image is absent from the varmap unless the XR carries one, so the module's
+                   own null default applies and it creates no Deployment -- which is what every
+                   service had before the image became a promotable value.
+
+                   It is not set in the component file and not asked for by the Backstage form.
+                   It comes from the environment's Release (prometeo-products,
+                   envs/<env>/release.yaml), which is why the same component file runs 2.2.0 in
+                   tst and 2.3.1 in dev. */ -}}
+            {{- if $spec.image -}}
+            {{- $vars = set $vars "image" $spec.image -}}
+            {{- end -}}
 
             {{- /* Where the Cognito client id comes from, in precedence order: a Secret in
                    this namespace, a literal on the XR, or — the normal case — the SSM parameter
@@ -191,6 +206,13 @@ spec:
                     enable_langfuse = var.enable_langfuse
                     vpa_min_allowed = var.vpa_min_allowed
 
+                    # The workload. With image null the module creates no Deployment and the rest
+                    # of these are unused; the pods keep coming from the service's pipeline.
+                    image               = var.image
+                    replicas            = var.replicas
+                    workload_probe_path = var.workload_probe_path
+                    workload_envs       = var.workload_envs
+
                     # Empty is passed through as null so bootstrap-service's own validation names the missing
                     # input, rather than CloudFront failing later on an empty WebACL association.
                     enable_sso         = var.enable_sso
@@ -277,6 +299,16 @@ spec:
                   variable "enable_langfuse" { type = bool }
                   variable "egress_domains" { type = list(string) }
                   variable "vpa_min_allowed" { type = map(string) }
+                  variable "replicas" { type = number }
+                  variable "workload_probe_path" { type = string }
+                  variable "workload_envs" { type = map(string) }
+
+                  # Absent from the varmap when the XR has no image, so this default decides
+                  # whether bootstrap-service creates a Deployment at all.
+                  variable "image" {
+                    type    = string
+                    default = null
+                  }
 
                   variable "egress_to" {
                     type = list(object({ service = string, port = number }))

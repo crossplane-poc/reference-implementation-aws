@@ -34,8 +34,9 @@ this product look like **here**"*. Two things have to move between environments 
 - **the image versions** — which build of each service is running.
 
 And two things must *not* move: the environment's own facts (account, VPC, domain) and its own
-sizing (replicas, database size, retention). Production must not inherit dev's replica count
-because someone promoted a release.
+settings — replicas, database size, retention, log level, feature flags. Production must not
+inherit dev's replica count or dev's debug logging because someone promoted a release. How that
+split is expressed is §5.
 
 ---
 
@@ -123,7 +124,7 @@ So each environment needs three inputs, and produces one output:
 |---|---|---|---|
 | `products/<p>/base/*.yaml` | what the product is made of | Backstage | — |
 | `products/<p>/envs/<e>/release.yaml` | **what this environment runs** | `promote.py`; build pipelines in dev only | **yes, as one unit** |
-| `products/<p>/envs/<e>/overrides.yaml` | how big it is here | a person | **never** |
+| `products/<p>/envs/<e>/overrides.yaml` | how big it is here, and how it is configured here | a person | **never** |
 | `products/<p>/rendered/<e>/*.yaml` | what ArgoCD applies | `render.py` | output |
 
 ### The Release is the unit of promotion
@@ -204,7 +205,83 @@ request arrives complete even though the scaffolder cannot run the renderer.
 
 ---
 
-## 5. A day in the life
+## 5. Configuration, per environment
+
+"Promote the whole release" raises the obvious question: if everything moves together, how does
+anything differ between environments? Three layers, and which layer a value belongs in is decided
+by one question — *does this value describe the release, or does it describe where the release is
+running?*
+
+| layer | where it lives | who owns it | example | promoted? |
+|---|---|---|---|---|
+| **cluster facts** | `environments/<rung>/environment.yaml` (this repo) | platform | account, VPC, subnets, `dnsDomain`, Cognito pool, default sizes | n/a — one per cluster |
+| **per-product, per-environment** | `products/<p>/envs/<e>/overrides.yaml` | the product team | replicas, ACUs, retention days, log level, feature flags | **never** |
+| **the release** | `products/<p>/envs/<e>/release.yaml` | `promote.py` | component set, image digests, `componentsRevision` | **yes, whole** |
+
+The first layer is why a component manifest names no environment: bucket names, role paths and
+ingress hosts are all derived from the cluster's `EnvironmentConfig` at apply time. Nothing to
+configure per product.
+
+The second layer is the answer to the question. `overrides.yaml` is a list of patches against the
+components, applied at render time:
+
+```yaml
+# products/add/envs/prd/overrides.yaml
+spec:
+  overrides:
+    - target: { kind: AppService, name: backend }
+      patch:
+        spec:
+          replicas: 4
+          env:
+            LOG_LEVEL: "warn"
+            FEATURE_NEW_SEARCH: "false"
+            UPSTREAM_TIMEOUT_SECONDS: "30"
+
+    - target: { kind: PostgresDatabase, name: database }
+      patch:
+        spec:
+          instanceCount: 2      # writer + reader, so a failover is not an outage
+          minACU: 2
+          maxACU: 16
+          logExports: ["postgresql"]
+
+    - target: { kind: ObjectStore, name: kosbucket }
+      patch: { spec: { expirationDays: 365 } }
+```
+
+dev's equivalent says `replicas: 1`, `LOG_LEVEL: debug`, `expirationDays: 7`. Any field on any
+component can be overridden this way — the patch is merged into the component before it is
+rendered, so there is no separate list of "overridable settings" to maintain.
+
+`spec.env` becomes the service's `<service>-envs` ConfigMap. That ConfigMap already existed: in
+the Helm path the deploy workflow assembles it from GitHub repository variables, which is why
+nothing in Git records what is in it and why a namespace cannot be rebuilt from Git alone.
+Declaring it here is what moves that configuration into review.
+
+Two rules keep the layers from leaking:
+
+- **`promote.py` never touches `overrides.yaml`.** Promoting dev into prd changes the image
+  digests and the component list. prd keeps its four replicas, its `warn` log level and its
+  365-day retention. You can watch this happen: promote `add` into `tst` on the branch and the
+  only line that changes in `rendered/tst/backend.yaml` is the image.
+- **Platform values win over product values.** The service's own `<service>-envs` is mounted
+  *before* `<service>-base-envs`, so a product cannot accidentally override `DATABASE_HOST`, a
+  sibling service host, or the Datadog wiring with a stray variable of the same name.
+
+Secrets are not in any of these layers. `<service>-secrets` is mounted optionally and written by
+External Secrets — see §9.
+
+### When something genuinely cannot be the same shape
+
+Occasionally an environment needs a component the others do not have, or must not have one they
+do. That is the component list in `release.yaml`, not `overrides.yaml`: a component exists in an
+environment when it is on that environment's list. dev has `kosbucket` on this branch and the
+other three do not, because it has not been promoted yet.
+
+---
+
+## 6. A day in the life
 
 **A developer adds an S3 bucket.** They fill in the Backstage `s3` form. It opens a pull request
 adding `products/add/base/kosbucket.yaml`. CI renders; because dev's Release says
@@ -241,7 +318,7 @@ and waits for a person to sync it.
 
 ---
 
-## 6. Who may promote what
+## 7. Who may promote what
 
 Four independent gates, none of which this repository can talk its way past:
 
@@ -266,7 +343,7 @@ to write it.
 
 ---
 
-## 7. How to deploy this
+## 8. How to deploy this
 
 Nothing below deploys anything by itself. Steps 1–3 are needed for the model to work on the
 existing single cluster; 4–6 are what adding a real environment looks like.
@@ -308,28 +385,14 @@ plan and writes nothing.
 
 ---
 
-## 8. What is not done
+## 9. What is not done
 
 Listed honestly, worst first.
 
-**The image does not reach the pods yet.** This is the one real gap. `spec.image` is now on the
-`AppService` XRD and is rendered into every environment's manifests, but the composition does not
-consume it: `tf-common-modules/bootstrap-service` creates the namespace, the IRSA service account,
-the ConfigMaps, the network policies and the ingress — but **no Deployment**. The pods are still
-installed by each service repo's pipeline with the `service-deploy` Helm chart.
-
-Two ways to close it, both real work outside this repository:
-
-- *Preferred:* add `image` and `replicas` inputs and a `kubernetes_deployment` to
-  `bootstrap-service`, and pass them through in the composition's `$vars`. One owner for all of a
-  service's Kubernetes objects, and the module already owns the namespace they live in. Requires a
-  change in `IAGAI/tf-common-modules`, a different org.
-- *Alternative:* one extra ArgoCD Application per service, installing the existing `service-deploy`
-  chart with the image from the rendered manifests. No Terraform change, but now two systems own
-  one service's Kubernetes objects.
-
-Nothing was plumbed speculatively: passing an argument `bootstrap-service` does not accept would
-fail `terraform plan` for every service in dev.
+**The `tf-common-modules` branch is not merged.** `bootstrap-service` now creates the Deployment,
+the Service and the `<service>-envs` ConfigMap when `image` is set, but that lives on
+`ital-1901-add-sb3-environment` and is not released. Every component pins that branch already, so
+the PoC picks it up; a real environment needs the branch merged and tagged.
 
 **The environment configs are placeholders.** tst, uat and prd have invented account ids, VPCs and
 zone ids. Real values come from `generate-environment-config.sh` once the accounts exist.

@@ -88,7 +88,7 @@ resolved by Crossplane from the target cluster's `EnvironmentConfig` at apply ti
 
 | option | good | bad |
 |---|---|---|
-| **EnvironmentConfig + overrides.yaml** *(picked)* | Promotion is a file copy, because there is nothing environment-shaped in the file being copied. Sizing is separate and never promoted, so prd cannot inherit dev's replica count. | Two places to look when asking "why is this value what it is". A missing `EnvironmentConfig` fails at reconcile time, not at review time. |
+| **EnvironmentConfig + overrides.yaml** *(picked)* | Promotion is a file copy, because there is nothing environment-shaped in the file being copied. Sizing and application config are separate and never promoted, so prd cannot inherit dev's replica count or its debug logging. Any field on any component can be overridden, so there is no list of "overridable settings" to keep up to date. | Three places to look when asking "why is this value what it is". A missing `EnvironmentConfig` fails at reconcile time, not at review time. |
 | **Helm values per environment** | Familiar. One chart, four values files. Rich templating. | Reintroduces templating between the pull request and the cluster — the diff a reviewer sees stops being the change. Charts drift into conditionals nobody can read. |
 | **Kustomize overlays per environment** | Standard, ArgoCD ships it, patches are explicit. | The overlay has to name every resource it patches, so scaffolding a component means editing a `kustomization.yaml` — the exact thing this repo removed on purpose. |
 | **A full copy of the manifests per environment** | Dead simple. Nothing to learn. | Four copies of every file, drifting. "dev and tst differ only in X" becomes unprovable. |

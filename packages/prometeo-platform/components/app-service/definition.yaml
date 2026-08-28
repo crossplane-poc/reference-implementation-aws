@@ -1,9 +1,13 @@
 # AppService — one service, from tf-common-modules/bootstrap-service.
 #
 # A namespace, an IRSA role, an OIDC deploy role, network policies, optionally an ingress on the
-# shared ALB and a CloudFront/Cognito gate in front of it. The workload itself is still deployed
-# by the service's own pipeline, exactly as in IMS — unlike the native `AppService`, which owns
-# the Deployment too.
+# shared ALB and a CloudFront/Cognito gate in front of it.
+#
+# The workload follows `spec.image`. Without it the module creates no Deployment and the pods
+# come from the service's own pipeline, exactly as in IMS. With it, bootstrap-service owns the
+# Deployment, the Service and the `<name>-envs` ConfigMap — which is what makes the image
+# version a promotable value rather than something known only inside a workflow run. The two are
+# mutually exclusive; see the module's "Who deploys the pods".
 #
 # Terraform equivalent: one `module "<service>"` block in modules/products/<product>/{frontend,backend}.tf.
 apiVersion: apiextensions.crossplane.io/v2
@@ -71,8 +75,33 @@ spec:
                   type: integer
                   description: >-
                     Defaults to the environment's `defaults.replicas`. Set per environment in
-                    envs/<env>/config.yaml, which is NEVER promoted -- so promoting a release
+                    envs/<env>/overrides.yaml, which is NEVER promoted -- so promoting a release
                     into prd cannot bring dev's replica count with it.
+                env:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: >-
+                    Environment variables for the service, written to its `<name>-envs`
+                    ConfigMap. This is where per-environment application configuration goes --
+                    a log level, a feature flag, a partner endpoint that differs between tst and
+                    prd -- and like replicas it is set in envs/<env>/overrides.yaml and never
+                    promoted.
+
+                    Not for secrets. Those go in `<name>-secrets`, mounted optionally and
+                    written by External Secrets, not by this component.
+
+                    Platform-owned values (DATABASE_HOST, the sibling service hosts, the Datadog
+                    wiring) come from `<name>-base-envs`, which is mounted after this one, so
+                    nothing set here can override them.
+                  default: {}
+                probePath:
+                  type: string
+                  description: >-
+                    HTTP path for the startup, liveness and readiness probes. Must return 200
+                    without authentication -- a Next.js frontend answering 401 on `/` needs a
+                    dedicated route, because a probe on `/` never goes Ready.
+                  default: /health
                 productDeveloperRole:
                   type: boolean
                   description: >-
