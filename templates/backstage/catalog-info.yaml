@@ -13,6 +13,7 @@ spec:
     - ./database/template.yaml
     - ./s3/template.yaml
     - ./delete/template.yaml
+    - ./promote/template.yaml
 ---
 apiVersion: backstage.io/v1alpha1
 kind: Location

@@ -1,0 +1,22 @@
+# The entry point ArgoCD syncs onto the dev cluster.
+#
+# One of these per rung. It is the whole platform -- packages, config, components, byte-identical
+# in every environment -- plus exactly one file that differs: this cluster's EnvironmentConfig.
+# That single file is the entire environment-specific surface of the platform, and it is why a
+# component manifest can be promoted between environments unchanged.
+#
+# The three directories are listed here rather than pulled in via ../../ because a kustomization
+# nested inside the directory it references is a cycle as far as kustomize is concerned. The
+# root ../../kustomization.yaml still builds the platform on its own, without an
+# EnvironmentConfig -- useful for a diff, not something to sync.
+#
+# Wired in packages/addons/values.yaml as prometeo-platform-dev, selected by the
+# prometeo.iag.ai/rung label on the ArgoCD cluster Secret.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../packages
+  - ../../config
+  - ../../components
+  - environment.yaml

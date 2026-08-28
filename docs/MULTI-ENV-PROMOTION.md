@@ -1,0 +1,361 @@
+# Multi-environment deployment and promotion
+
+How a product gets from a developer's pull request to production, through `dev → tst → uat → prd`,
+with Backstage as the front door and ArgoCD as the thing that actually deploys.
+
+This document explains how it works, how to stand it up, and what is left to do.
+[`MULTI-ENV-ALTERNATIVES.md`](./MULTI-ENV-ALTERNATIVES.md) covers the choices we made and what we
+would have got instead.
+
+> [!NOTE]
+> This is the implementation of the target recommended in
+> [`environments_and_promotion.md`](./environments_and_promotion.md), which is the analysis that
+> came first: where the pipeline is today, the five decisions, and what other people do. It is
+> still the better document to read for *why an environment ladder at all*. The vocabulary here
+> matches it deliberately — `base/`, `envs/<env>/release.yaml`, `envs/<env>/overrides.yaml`.
+>
+> Two things here are new since that analysis: **`componentsRevision`**, without which only
+> images promote and configuration does not (§3), and **committed rendered manifests**, which is
+> what makes a promotion pull request show the actual change (§4).
+
+---
+
+## 1. The problem
+
+Today one cluster runs one copy of each product. A Backstage template opens a pull request,
+someone merges it, someone syncs ArgoCD, and infrastructure appears. There is exactly one of
+everything, so there is nothing to promote.
+
+Four environments changes the question from *"what does this product look like"* to *"what does
+this product look like **here**"*. Two things have to move between environments together:
+
+- **the components** — the services, databases and buckets a product is made of, and their
+  settings;
+- **the image versions** — which build of each service is running.
+
+And two things must *not* move: the environment's own facts (account, VPC, domain) and its own
+sizing (replicas, database size, retention). Production must not inherit dev's replica count
+because someone promoted a release.
+
+---
+
+## 2. The shape
+
+```mermaid
+flowchart TB
+    subgraph GH["GitHub"]
+        SVC["service repos<br/>iag-mro-add-be, -fe"]
+        PROD["crossplane-poc/prometeo-products<br/><i>components, Releases, rendered manifests</i>"]
+        REF["crossplane-poc/reference-implementation-aws<br/><i>platform, ApplicationSets, templates</i>"]
+    end
+
+    BS["Backstage<br/><i>scaffold · promote · view</i>"]
+
+    subgraph HUB["hub cluster — ims-eu-west-1 (sb3)"]
+        ARGO["ArgoCD"]
+        XP["Crossplane + provider-terraform"]
+    end
+
+    subgraph SPOKES["workload accounts"]
+        DEV["dev<br/>515048895486"]
+        TST["tst<br/>222233334444"]
+        UAT["uat<br/>333344445555"]
+        PRD["prd<br/>444455556666"]
+    end
+
+    SVC -->|"pins image digest in dev"| PROD
+    BS -->|"opens PRs"| PROD
+    BS -->|"triggers promotion"| PROD
+    PROD -->|"watched by"| ARGO
+    REF -->|"watched by"| ARGO
+    ARGO --> XP
+    XP --> DEV
+    XP --> TST
+    XP --> UAT
+    XP -.->|"manual sync only"| PRD
+```
+
+**One ArgoCD, four clusters, four AWS accounts.** Hub-and-spoke: the hub holds ArgoCD and
+Crossplane; each rung is its own account and its own EKS cluster. The hub reaches a spoke by
+assuming a role in that account — there are no stored cluster credentials anywhere.
+
+Today dev *is* the hub cluster, because the PoC has one cluster. That is a label on a Secret, not
+a structural fact: when a real dev account exists, move the `prometeo.iag.ai/rung: dev` label onto
+that cluster and nothing else changes.
+
+`prd` is already separated as far as it can be inside one ArgoCD — its own ApplicationSet, its own
+AppProject, no automatic sync. Moving it to a **second ArgoCD** is the recommended next step and
+is discussed in the alternatives document.
+
+---
+
+## 3. The three files
+
+Everything hangs off one idea: **a component manifest contains no environment**.
+
+```yaml
+# products/add/base/kosbucket.yaml — the whole file
+apiVersion: platform.prometeo.iag.ai/v1alpha1
+kind: ObjectStore
+metadata: { name: kosbucket, namespace: add }
+spec:
+  product: add
+  expirationDays: 15
+  access:
+    - { service: kosbackend, level: ro }
+```
+
+No account. No region. No bucket name. Those come from the cluster it lands on, out of that
+cluster's `EnvironmentConfig`, at the moment Crossplane renders it:
+
+```
+bucket = <product>-<last 4 of account id>-<environment>-<name>
+```
+
+Apply that file in dev and you get `add-5486-sb3-kosbucket`. Apply the *same bytes* in prd and you
+get `add-6666-prd-kosbucket`. **This is why promotion is a file copy** rather than a rewrite, and
+it is the single most important property of the design. It was already true before this work —
+it is what made a promotion model cheap to build.
+
+So each environment needs three inputs, and produces one output:
+
+| file | holds | who writes it | promoted? |
+|---|---|---|---|
+| `products/<p>/base/*.yaml` | what the product is made of | Backstage | — |
+| `products/<p>/envs/<e>/release.yaml` | **what this environment runs** | `promote.py`; build pipelines in dev only | **yes, as one unit** |
+| `products/<p>/envs/<e>/overrides.yaml` | how big it is here | a person | **never** |
+| `products/<p>/rendered/<e>/*.yaml` | what ArgoCD applies | `render.py` | output |
+
+### The Release is the unit of promotion
+
+```yaml
+# products/add/envs/tst/release.yaml
+spec:
+  componentsRevision: 6b94535…        # which commit's component files
+  components: [backend, database, frontend, kosbackend, media, namespace, product, statics]
+  images:
+    backend:  { repository: …/ims/add-be, tag: "2.2.0", digest: "sha256:03def9a4…" }
+    frontend: { repository: …/ims/add-fe, tag: "1.9.2", digest: "sha256:ef10284d…" }
+  promotedFrom: { environment: dev, release: a5fd44d7c70a, at: …, by: albert }
+```
+
+Three things worth noticing:
+
+**`componentsRevision` is pinned.** tst renders the component files *as they were at that commit*,
+not as they are on `main` today. Without this, editing `base/backend.yaml` would change
+production at the next render — a config change reaching prd having passed through no environment
+at all. With it, an edit is live in dev immediately and reaches tst only when someone promotes.
+
+That pin is also what makes it safe to keep auto-merging Backstage's pull requests.
+
+**Images are pinned by digest.** A tag is a label someone can move; `:dev` moves every build. The
+digest is the bytes that passed the rung below. Promoting copies the digest, so "tested in tst" and
+"running in prd" are the same artefact, provably.
+
+**It moves whole.** You cannot promote just the frontend. The combination of component set and
+image versions is what was tested one rung down; promoting a subset deploys a combination nobody
+has ever run. This is a deliberate constraint and the most likely thing someone will push back on —
+see the alternatives document.
+
+### dev is the exception
+
+dev is the only rung nothing promotes into, so it does not pin anything:
+
+```yaml
+componentsRevision: HEAD
+components: ["*"]
+```
+
+Scaffolding a component is still just dropping a file — no list to append to, which is the property
+the old plain-manifest layout was protecting. Above dev the list is explicit, because up there the
+list *is* the thing being promoted.
+
+---
+
+## 4. Why `rendered/` is committed to git
+
+`render.py` merges the three inputs into plain Kubernetes manifests and commits them. ArgoCD syncs
+those, not a Helm chart and not a Kustomize overlay.
+
+This costs some duplication in git. It buys the thing that makes the whole model reviewable: **a
+promotion pull request is the literal diff of what will change in that environment.**
+
+```diff
+  products/add/envs/tst/release.yaml
++    - kosbucket
+-      tag: "2.2.0"
++      tag: "2.3.1"
+
+  products/add/rendered/tst/backend.yaml
+-  image: …/ims/add-be:2.2.0@sha256:03def9a4…
++  image: …/ims/add-be:2.3.1@sha256:7fcaadba…
+
+  products/add/rendered/tst/kosbucket.yaml   (new file)
+```
+
+Five files, and every one of them is something that is actually changing. Nobody has to evaluate a
+template in their head to review a production change. This is the "rendered manifests" pattern;
+ArgoCD is growing native support for it (the [Source Hydrator](https://argo-cd.readthedocs.io/en/latest/user-guide/source-hydrator/)),
+which is where this should eventually move.
+
+Rendering is deterministic — same inputs, same bytes. CI re-renders on every pull request, commits
+the result onto the branch, and then verifies it is reproducible. So a Backstage-scaffolded pull
+request arrives complete even though the scaffolder cannot run the renderer.
+
+---
+
+## 5. A day in the life
+
+**A developer adds an S3 bucket.** They fill in the Backstage `s3` form. It opens a pull request
+adding `products/add/base/kosbucket.yaml`. CI renders; because dev's Release says
+`components: ["*"]`, the bucket appears in `rendered/dev/`. Auto-merge merges it — it only touched
+dev-safe paths. ArgoCD syncs dev. The bucket exists in the dev account. **tst, uat and prd are
+untouched**, because their Releases list components explicitly.
+
+**A service is built.** `iag-mro-add-be`'s pipeline pushes `2.3.1` to ECR and calls:
+
+```sh
+tools/set_image.py --product add --service backend \
+  --repository 525426937140.dkr.ecr.eu-west-1.amazonaws.com/ims/add-be \
+  --tag 2.3.1 --digest sha256:7fcaadba…
+```
+
+which pins it in `envs/dev/release.yaml`. The script **refuses any environment but dev** — a build
+pipeline that could write to prd would make the ladder decorative.
+
+**Someone promotes.** In Backstage: *Promote a product* → product `add`, into `tst`. That
+dispatches the `promote.yaml` workflow, which copies dev's Release onto tst, re-renders, and opens
+a pull request:
+
+```
+add: dev -> tst
+  components added     kosbucket
+  image backend          2.2.0 -> 2.3.1   <-- changes
+  image frontend         1.9.2 -> 1.10.0   <-- changes
+  image kosbackend       0.9.4 -> 0.9.4
+```
+
+A reviewer approves. Merging it does not deploy — ArgoCD does, on its next refresh, because tst
+has automated sync. For **prd**, merging does not deploy either: prd's Application goes `OutOfSync`
+and waits for a person to sync it.
+
+---
+
+## 6. Who may promote what
+
+Four independent gates, none of which this repository can talk its way past:
+
+| gate | where | stops |
+|---|---|---|
+| **GitHub Environment** on the promote job | `.github/workflows/promote.yaml` | starting a uat/prd promotion without an approver |
+| **CODEOWNERS** on `envs/prd/` | `prometeo-products/CODEOWNERS` | merging a prd promotion without a second team |
+| **Auto-merge is dev-only** | `.github/workflows/automerge.yml` | a bot merging anything above dev |
+| **AppProject per rung** | `packages/argo-cd/manifests/appproject-prometeo-*.yaml` | an Application for tst deploying to prd's cluster |
+
+Plus two properties of the design itself:
+
+- **`set_image.py` refuses non-dev**, so no build pipeline holds a path to production.
+- **The hub holds no cluster credentials.** It assumes a role per spoke account. Revoking the
+  hub's access to prd is deleting one trust policy, done by the prd account's owners, and it shows
+  up in prd's own CloudTrail.
+
+AppProjects are also narrowed from `'*'/'*'` to what products actually create: `Namespace`, and
+resources in `platform.prometeo.iag.ai`. Everything real — Workspaces, IAM, buckets — is created
+by Crossplane under the provider's credentials, not by ArgoCD, so ArgoCD does not need permission
+to write it.
+
+---
+
+## 7. How to deploy this
+
+Nothing below deploys anything by itself. Steps 1–3 are needed for the model to work on the
+existing single cluster; 4–6 are what adding a real environment looks like.
+
+**1. Merge the two pull requests.**
+[`prometeo-products#46`](https://github.com/crossplane-poc/prometeo-products/pull/46) (layout,
+tooling, workflows) and the matching one here (platform, ApplicationSets, Backstage template).
+
+**2. Create the GitHub Environments.** In `crossplane-poc/prometeo-products` → Settings →
+Environments, create `tst`, `uat`, `prd`. Add required reviewers to `uat` and `prd`. Without this
+the promote workflow runs unattended, which is the one thing the design assumes it will not do.
+
+**3. Set branch protection on `main`** with "require review from Code Owners", so `CODEOWNERS` has
+force. Allow the auto-merge bot to bypass it for the dev-only path set.
+
+**4. Check what dev renders.** `prometeo-platform-dev` should sync onto the hub and produce the
+same 22 resources it does today, plus the `image`/`replicas` fields on the `AppService` XRD:
+
+```sh
+kubectl kustomize packages/prometeo-platform/environments/dev | grep -c '^kind:'   # 22
+diff <(kubectl kustomize packages/prometeo-platform/environments/dev) \
+     <(kubectl kustomize packages/prometeo-platform/environments/prd)              # only the EnvironmentConfig
+```
+
+**5. Add a real environment.** For each of tst/uat/prd:
+
+- create the account and EKS cluster;
+- run `scripts/generate-environment-config.sh` against it and replace the `REPLACE_ME` block in
+  `packages/prometeo-platform/environments/<rung>/environment.yaml`;
+- create `prometeo-argocd-deployer` in that account, trusting the hub's ArgoCD role, and map it in
+  the cluster's `aws-auth` / access entries;
+- fill in the endpoint and CA in `packages/argo-cd/manifests/clusters-prometeo-spokes.yaml`.
+
+The rung's `prometeo-platform-<rung>` Application then appears on its own, because the addon
+selector matches the `prometeo.iag.ai/rung` label — and so do that rung's product Applications.
+
+**6. Promote something.** `tools/promote.py --product add --to tst --dry-run` first; it prints the
+plan and writes nothing.
+
+---
+
+## 8. What is not done
+
+Listed honestly, worst first.
+
+**The image does not reach the pods yet.** This is the one real gap. `spec.image` is now on the
+`AppService` XRD and is rendered into every environment's manifests, but the composition does not
+consume it: `tf-common-modules/bootstrap-service` creates the namespace, the IRSA service account,
+the ConfigMaps, the network policies and the ingress — but **no Deployment**. The pods are still
+installed by each service repo's pipeline with the `service-deploy` Helm chart.
+
+Two ways to close it, both real work outside this repository:
+
+- *Preferred:* add `image` and `replicas` inputs and a `kubernetes_deployment` to
+  `bootstrap-service`, and pass them through in the composition's `$vars`. One owner for all of a
+  service's Kubernetes objects, and the module already owns the namespace they live in. Requires a
+  change in `IAGAI/tf-common-modules`, a different org.
+- *Alternative:* one extra ArgoCD Application per service, installing the existing `service-deploy`
+  chart with the image from the rendered manifests. No Terraform change, but now two systems own
+  one service's Kubernetes objects.
+
+Nothing was plumbed speculatively: passing an argument `bootstrap-service` does not accept would
+fail `terraform plan` for every service in dev.
+
+**The environment configs are placeholders.** tst, uat and prd have invented account ids, VPCs and
+zone ids. Real values come from `generate-environment-config.sh` once the accounts exist.
+
+**`tf-common-modules` still pins a branch.** Every component pins
+`ital-1901-add-sb3-environment` because no released tag accepts `sb3`. Tags accept `dev`, `tst`,
+`uat` and `prd`, so the real environments can use a real tag — but dev cannot until that branch
+merges and is tagged.
+
+**Secrets are still pushed from CI, and this gates a real dev/tst/uat/prd split.** Today each
+service's non-Terraform environment variables and secrets are pushed into the cluster by a GitHub
+Actions run (`deploy-env.yml`), so half of what a namespace needs exists only inside a workflow.
+ArgoCD cannot rebuild a namespace on its own until that moves to External Secrets reading from
+Secrets Manager or SSM — the Terraform-owned `<svc>-base-envs` / `<svc>-base-secrets` are the
+pattern to extend. `environments_and_promotion.md` calls this out as the dependency that gates
+everything else, and it is easy to underestimate because nothing is visibly broken until the first
+cluster is rebuilt. Promotion works without it; **standing up a new environment does not**.
+
+**No verification gate.** Promotion is "a person decided". There is nowhere yet to say "tst's smoke
+tests passed, so this release is eligible for uat". That is the point at which Kargo starts paying
+for itself, and the Release file is deliberately shaped like Kargo's Freight so it is an upgrade
+rather than a rewrite.
+
+**No rollback command.** Rolling back is `git revert` on the promotion commit and re-sync, which
+works but is not a button. A `--to-release <id>` flag on `promote.py` would make it one.
+
+**Drift in prd is visible, not corrected.** prd has no `selfHeal`, because that is part of ArgoCD's
+`automated` block and prd deliberately has no automated sync. A manual change to the prd cluster
+shows as `OutOfSync` rather than being reverted.

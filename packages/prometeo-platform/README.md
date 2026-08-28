@@ -2,9 +2,25 @@
 
 The Crossplane layer that turns a manifest in
 [crossplane-poc/prometeo-products](https://github.com/crossplane-poc/prometeo-products) into AWS
-infrastructure. ArgoCD syncs this directory into the sb3 control plane
-(`ims-eu-west-1`, account `515048895486`) through the `prometeo-platform` addon in
-`packages/addons/values.yaml`.
+infrastructure.
+
+ArgoCD syncs **`environments/<rung>/`**, not this directory directly — one Application per rung,
+wired as `prometeo-platform-<rung>` in `packages/addons/values.yaml` and selected by the
+`prometeo.iag.ai/rung` label on the cluster's ArgoCD Secret. Today only `dev` resolves, to the sb3
+control plane (`ims-eu-west-1`, account `515048895486`); the other three generate no Application
+until those clusters are registered.
+
+Each rung is the same platform plus one file:
+
+```sh
+kubectl kustomize environments/dev | grep -c '^kind:'          # 22
+diff <(kubectl kustomize environments/dev) \
+     <(kubectl kustomize environments/prd)                     # only the EnvironmentConfig
+```
+
+That single differing file is the entire environment-specific surface of the platform, and it is
+why a component manifest can be promoted between environments unchanged. See
+[`docs/MULTI-ENV-PROMOTION.md`](../../docs/MULTI-ENV-PROMOTION.md).
 
 ## How a component runs
 
@@ -30,7 +46,8 @@ job is translating camelCase spec fields into snake_case module variables.
 | | wave | |
 |---|---|---|
 | `packages/` | -20 | The three composition functions and `provider-terraform`, with the pod it runs in |
-| `config/` | -10 | Workspace activation, the provider's in-cluster RBAC, the root-module plumbing, and this cluster's `EnvironmentConfig` |
+| `config/` | -10 | Workspace activation, the provider's in-cluster RBAC, and the root-module plumbing. Identical in every environment |
+| `environments/<rung>/` | — | The entry point ArgoCD syncs: the three directories above plus that rung's `EnvironmentConfig` |
 | `components/` | 0 | One XRD + Composition per module: `Product`, `AppService`, `PostgresDatabase`, `ObjectStore`, `KeyValueTable`, `MessageQueue` |
 
 The waves matter: each directory needs CRDs the previous one installs.

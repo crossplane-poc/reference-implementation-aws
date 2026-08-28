@@ -1,0 +1,88 @@
+# THE `tst` RUNG OF THE LADDER -- the facts about the tst cluster and account.
+#
+# PLACEHOLDER. Everything under "generated from the target account / cluster" is invented: the
+# account does not exist yet. When it does, run scripts/generate-environment-config.sh against
+# that cluster and commit the real values over this block. Nothing else in this file changes.
+#
+# The point of this file is that it is the ONLY place the environment appears. A component
+# manifest in prometeo-products has no account, no VPC and no domain in it, so the same manifest
+# applied here and in dev produces correctly-named resources in both. That is what reduces a
+# promotion to copying a Release.
+apiVersion: apiextensions.crossplane.io/v1beta1
+kind: EnvironmentConfig
+metadata:
+  name: prometeo-environment
+data:
+  environment: tst
+  region: eu-west-1
+
+  # ---- generated from the target account / cluster (ALL PLACEHOLDER) ----------------------
+  accountId: "222233334444"
+  clusterName: ims-tst-eu-west-1
+  oidcProviderHost: oidc.eks.eu-west-1.amazonaws.com/id/REPLACE_ME
+  vpcId: vpc-REPLACE_ME
+  vpcCidr: 10.0.0.0/20
+  nodeSecurityGroupId: sg-REPLACE_ME
+  databaseSubnetIds:
+    - subnet-REPLACE_ME_A
+    - subnet-REPLACE_ME_B
+    - subnet-REPLACE_ME_C
+  databaseSubnetCidrs: ["10.0.14.0/24", "10.0.12.0/24", "10.0.13.0/24"]
+  privateSubnetCidrs: ["10.0.2.0/23", "10.0.4.0/23", "10.0.0.0/23"]
+  dnsServiceIp: 172.20.0.10
+  vpcEndpoints:
+    sts: { ips: ["10.0.3.10", "10.0.5.10", "10.0.1.10"] }
+    ecrDkr: { ips: ["10.0.3.11", "10.0.5.11", "10.0.1.11"] }
+    bedrockRuntime: { ips: ["10.0.3.12", "10.0.5.12", "10.0.1.12"] }
+    s3: { ips: ["10.0.3.13", "10.0.5.13", "10.0.1.13"] }
+    sqs: { ips: ["10.0.3.14", "10.0.5.14", "10.0.1.14"] }
+    dynamodb:
+      ips: ["10.0.3.15", "10.0.5.15", "10.0.1.15"]
+      dnsName: "vpce-REPLACE_ME.dynamodb.eu-west-1.vpce.amazonaws.com"
+
+  # ---- platform conventions ---------------------------------------------------------------
+  dnsDomain: tst.ims.iag.ai
+  dnsZoneId: "ZREPLACEMETST"
+  ingress:
+    className: alb-private
+  providerConfig:
+    kind: ClusterProviderConfig
+    name: aws
+
+  # ---- SSO edge (SsoEndpoint) -------------------------------------------------------------
+  cognito:
+    domain: uat.sso.iag.ai
+    parentDomain: iag.ai
+    sessionHmacSecretName: sso/session-hmac-secret
+    # Empty means this account holds its own client-id parameter. Only dev reads it
+    # cross-account, because dev's Cognito pool lives in the apigateway account; each real
+    # environment is expected to own its pool, so there is no role to assume.
+    clientIdAssumeRoleArn: ""
+  cloudfront:
+    vpcOriginId: "REPLACE_ME"
+    albDomainName: "REPLACE_ME.eu-west-1.elb.amazonaws.com"
+    responseHeadersPolicyId: "REPLACE_ME"
+    # AWS-managed policies -- the same ids in every account, so these are real.
+    cachingDisabledPolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+    allViewerPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3
+  images:
+    awsCli: public.ecr.aws/aws-cli/aws-cli:2.31.11
+
+  # ---- defaults a component uses when its spec leaves a value out --------------------------
+  # A floor, not a policy. Per-product sizing lives in prometeo-products envs/<env>/config.yaml
+  # and is never promoted; these apply only to a component that asks for nothing.
+  defaults:
+    replicas: 1
+    database:
+      engineVersion: "16.11"
+      minACU: 0.5
+      maxACU: 4
+
+  # ---- tags applied to every AWS resource --------------------------------------------------
+  tags:
+    group:op-co-code: iaggbs
+    group:platform: prometeo
+    group:environment: tst
+    env: tst
+    Environment: tst
+    ManagedBy: crossplane

@@ -286,16 +286,59 @@ crossplane-compositions:
         operator: In
         values: ['control-plane']
 
-prometeo-platform:
+# One entry per rung, not one entry with a templated path, because the pair that matters is
+# (selector, path) and here you can read both on the same screen. The platform itself --
+# packages, config, components -- is byte-identical in all four; the only difference is which
+# EnvironmentConfig the overlay pulls in. `kubectl kustomize packages/prometeo-platform/
+# environments/<rung>` renders 22 resources for every rung, and diffing two of those outputs
+# shows exactly one changed object.
+#
+# The selector is the rung label on the cluster Secret. dev resolves to the hub cluster today,
+# because the PoC has one cluster; the other three resolve to nothing until those clusters are
+# registered, and generate no Application in the meantime.
+prometeo-platform-dev:
   enabled: true
   namespace: crossplane-system
   type: manifest
-  path: packages/prometeo-platform
+  path: packages/prometeo-platform/environments/dev
   selector:
     matchExpressions:
-      - key: environment
+      - key: prometeo.iag.ai/rung
         operator: In
-        values: ['control-plane']
+        values: ['dev']
+
+prometeo-platform-tst:
+  enabled: true
+  namespace: crossplane-system
+  type: manifest
+  path: packages/prometeo-platform/environments/tst
+  selector:
+    matchExpressions:
+      - key: prometeo.iag.ai/rung
+        operator: In
+        values: ['tst']
+
+prometeo-platform-uat:
+  enabled: true
+  namespace: crossplane-system
+  type: manifest
+  path: packages/prometeo-platform/environments/uat
+  selector:
+    matchExpressions:
+      - key: prometeo.iag.ai/rung
+        operator: In
+        values: ['uat']
+
+prometeo-platform-prd:
+  enabled: true
+  namespace: crossplane-system
+  type: manifest
+  path: packages/prometeo-platform/environments/prd
+  selector:
+    matchExpressions:
+      - key: prometeo.iag.ai/rung
+        operator: In
+        values: ['prd']
 
 syncPolicy:
   automated:

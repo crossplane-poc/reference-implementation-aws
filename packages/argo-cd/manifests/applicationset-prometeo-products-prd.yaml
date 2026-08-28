@@ -1,0 +1,64 @@
+# Production. Same products, same repository, three deliberate differences from the other rungs.
+#
+#   1. No `automated:` block. A merged promotion makes prd's Application go OutOfSync and stop
+#      there. Someone syncs it, at a time they chose, watching it.
+#   2. Its own AppProject (prometeo-prd), whose only destination is the prd cluster. An
+#      Application in this set cannot be pointed at another environment even if its manifests
+#      say otherwise.
+#   3. Its own file. When prd moves to a second ArgoCD instance -- the recommended end state, so
+#      that the control plane holding production credentials is not the one developers use --
+#      this file moves with it and the other one does not change at all.
+#
+# Everything else is identical to applicationset-prometeo-products.yaml, and that is the point:
+# production runs the same manifests, produced by the same renderer, from the same repository.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: prometeo-products-prd
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - matrix:
+        generators:
+          - git:
+              repoURL: https://github.com/crossplane-poc/prometeo-products.git
+              revision: main
+              directories:
+                - path: products/*/rendered/prd
+          - clusters:
+              selector:
+                matchLabels:
+                  prometeo.iag.ai/rung: prd
+  template:
+    metadata:
+      name: 'prometeo-{{ index .path.segments 1 }}-prd'
+      labels:
+        prometeo.iag.ai/product: '{{ index .path.segments 1 }}'
+        prometeo.iag.ai/rung: prd
+    spec:
+      project: prometeo-prd
+      source:
+        repoURL: https://github.com/crossplane-poc/prometeo-products.git
+        targetRevision: main
+        path: '{{ .path.path }}'
+        directory:
+          recurse: false
+      destination:
+        name: '{{ .name }}'
+      syncPolicy:
+        # No automated block. This is the whole difference.
+        #
+        # selfHeal is off too, which is a real trade-off: a manual change made directly in the
+        # production cluster will persist instead of being reverted within minutes. It shows as
+        # OutOfSync, which is the signal. Turning selfHeal on without automated sync is not
+        # possible -- selfHeal is part of the automated block.
+        syncOptions:
+          - ServerSideApply=true
+        retry:
+          limit: -1
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 10m
