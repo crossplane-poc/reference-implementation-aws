@@ -1,0 +1,107 @@
+# The tst, uat and prd clusters, registered with the hub ArgoCD.
+#
+# PLACEHOLDER: the accounts and clusters do not exist yet. Endpoints, CA data and role ARNs are
+# REPLACE_ME. Everything structural is real -- this is the shape these Secrets take, not a sketch.
+#
+# It lives here rather than in ../manifests/ because that directory is a source of the
+# `argocd-<cluster>` Application: anything in it is applied to the hub automatically. Registering
+# three clusters whose endpoints are REPLACE_ME would generate a fistful of Applications that can
+# never connect. Move this file into ../manifests/ once the values below are real, and the rungs
+# come up on their own.
+#
+# There is no credential in any of these. `awsAuthConfig` tells ArgoCD to call
+# `eks:DescribeCluster` and then assume `roleARN` in the workload account to mint a short-lived
+# token for each request. So:
+#
+#   * nothing long-lived is stored in the cluster or in git,
+#   * revoking the hub's access to prd is deleting one IAM trust policy in the prd account,
+#     which is done by the prd account's owners and not by anyone with access to this repository,
+#   * the audit trail of who touched prd is CloudTrail in prd, not an ArgoCD log.
+#
+# The hub's own IRSA role needs sts:AssumeRole on each of these, and each spoke role needs a
+# trust policy naming the hub role. That is the only cross-account link, and it is one-way.
+#
+# The label that matters is `prometeo.iag.ai/rung`. The ApplicationSets match on it: a directory
+# named products/<p>/rendered/tst deploys to whichever cluster carries rung=tst. Two clusters
+# with the same rung label would generate two Applications with the same name, which ArgoCD
+# rejects -- so the mapping cannot silently become ambiguous.
+#
+# prd carries `prometeo.iag.ai/hub: prd` as well. It is unused today, because one ArgoCD manages
+# all four rungs. It is the seam along which prd's ApplicationSet and AppProject move to a
+# separate production ArgoCD, which is where this should end up: see
+# docs/MULTI-ENV-ALTERNATIVES.md, "How many ArgoCDs".
+apiVersion: v1
+kind: Secret
+metadata:
+  name: prometeo-cluster-tst
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: cluster
+    prometeo.iag.ai/rung: tst
+    environment: tst
+type: Opaque
+stringData:
+  name: ims-tst-eu-west-1
+  server: https://REPLACE_ME.gr7.eu-west-1.eks.amazonaws.com
+  config: |
+    {
+      "awsAuthConfig": {
+        "clusterName": "ims-tst-eu-west-1",
+        "roleARN": "arn:aws:iam::222233334444:role/prometeo-argocd-deployer"
+      },
+      "tlsClientConfig": {
+        "insecure": false,
+        "caData": "REPLACE_ME_BASE64_CA"
+      }
+    }
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: prometeo-cluster-uat
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: cluster
+    prometeo.iag.ai/rung: uat
+    environment: uat
+type: Opaque
+stringData:
+  name: ims-uat-eu-west-1
+  server: https://REPLACE_ME.gr7.eu-west-1.eks.amazonaws.com
+  config: |
+    {
+      "awsAuthConfig": {
+        "clusterName": "ims-uat-eu-west-1",
+        "roleARN": "arn:aws:iam::333344445555:role/prometeo-argocd-deployer"
+      },
+      "tlsClientConfig": {
+        "insecure": false,
+        "caData": "REPLACE_ME_BASE64_CA"
+      }
+    }
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: prometeo-cluster-prd
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: cluster
+    prometeo.iag.ai/rung: prd
+    environment: prd
+    prometeo.iag.ai/hub: prd
+type: Opaque
+stringData:
+  name: ims-prd-eu-west-1
+  server: https://REPLACE_ME.gr7.eu-west-1.eks.amazonaws.com
+  config: |
+    {
+      "awsAuthConfig": {
+        "clusterName": "ims-prd-eu-west-1",
+        "roleARN": "arn:aws:iam::444455556666:role/prometeo-argocd-deployer"
+      },
+      "tlsClientConfig": {
+        "insecure": false,
+        "caData": "REPLACE_ME_BASE64_CA"
+      }
+    }

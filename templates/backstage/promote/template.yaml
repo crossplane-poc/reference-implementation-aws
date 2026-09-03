@@ -1,0 +1,101 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: promote
+  title: "Promote a product"
+  description: >-
+    Move everything one environment is running -- its components and the exact image digests --
+    onto the next environment. Opens a pull request; it does not deploy.
+  tags:
+    - prometeo
+    - promotion
+spec:
+  owner: guests
+  type: promotion
+
+  parameters:
+    - title: What to promote
+      required:
+        - product
+        - to
+      properties:
+        product:
+          title: Product
+          type: string
+          description: The product to promote. Its components move together, as one release.
+          ui:field: EntityPicker
+          ui:options:
+            catalogFilter:
+              kind: System
+            defaultKind: System
+
+        to:
+          title: Promote into
+          type: string
+          description: >-
+            The environment to promote into. The source is always the rung below it -- tst comes
+            from dev, uat from tst, prd from uat -- so a release cannot skip an environment it
+            has not run in.
+          enum: [tst, uat, prd]
+          enumNames:
+            - "tst — from dev"
+            - "uat — from tst"
+            - "prd — from uat (needs an approver)"
+
+    - title: Confirm
+      properties:
+        # Not a real input: a place to say what is about to happen, in the form, before the
+        # button is pressed. The exact list of what changes is computed by the workflow and
+        # written into the pull request body -- this template deliberately does not try to
+        # recompute it, because two implementations of "what would change" would eventually
+        # disagree, and the one in the pull request is the one people act on.
+        acknowledge:
+          title: I understand what this does
+          type: boolean
+          default: false
+          description: >-
+            This promotes the WHOLE release: every component and every image version currently
+            running one rung below, together. That combination is what was tested there.
+            Individual services are not promoted separately.
+
+            Sizing is not promoted. The target environment keeps its own replica counts,
+            database size and retention (envs/<env>/overrides.yaml).
+
+            This opens a pull request. Nothing is deployed until it is merged, and prd is not
+            deployed even then -- prd is synced by hand.
+
+  steps:
+    - id: dispatch
+      name: Ask GitHub to prepare the promotion
+      action: github:actions:dispatch
+      input:
+        repoUrl: github.com?repo=prometeo-products&owner=crossplane-poc
+        workflowId: promote.yaml
+        branchOrTagName: main
+        workflowInputs:
+          product: ${{ parameters.product | parseEntityRef | pick('name') }}
+          to: ${{ parameters.to }}
+          # Recorded in the Release's promotedFrom.by, so the manifest itself says who asked
+          # for it -- not just the bot that committed it.
+          actor: ${{ user.entity.metadata.name }}
+
+  output:
+    text:
+      - title: What happens now
+        content: |
+          A promotion of **${{ parameters.product | parseEntityRef | pick('name') }}** into
+          **${{ parameters.to }}** has been requested.
+
+          ${{ parameters.to == 'prd' and 'Because the target is prd, the job is waiting for an
+          approver on the GitHub Environment before it produces anything.' or 'The job runs
+          immediately.' }}
+
+          It opens a pull request containing the new Release and the rendered manifests. The diff
+          under `products/.../rendered/${{ parameters.to }}/` is literally what ArgoCD will apply.
+    links:
+      - title: Watch the promotion job
+        url: https://github.com/crossplane-poc/prometeo-products/actions/workflows/promote.yaml
+        icon: github
+      - title: Open pull requests
+        url: https://github.com/crossplane-poc/prometeo-products/pulls
+        icon: github

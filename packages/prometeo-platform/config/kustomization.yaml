@@ -3,7 +3,10 @@
 #   32  activates the Workspace resource (SafeStart: provider CRDs ship inactive)
 #   33  what the provider pod may do inside the cluster
 #   42  the root-module plumbing every Workspace inherits — providers, aliases, state backend
-#   50  this cluster's facts: account, region, VPC, defaults. Every composition reads it.
+#
+# This cluster's facts -- account, region, VPC, domains -- are NOT here. They are the one
+# file that differs per rung, so they live in ../environments/<rung>/environment.yaml and are
+# pulled in by that rung's kustomization. This directory is identical in every environment.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -14,4 +17,3 @@ resources:
   - 32-activate-workspaces.yaml
   - 33-rbac-terraform.yaml
   - 42-terraform-provider-config.yaml
-  - 50-environment.yaml

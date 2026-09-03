@@ -1,37 +1,83 @@
+# One Application per (product, environment), for every environment except prd.
+#
+# prd is deliberately not here -- it has its own ApplicationSet, its own AppProject and no
+# automated sync, in applicationset-prometeo-products-prd.yaml. Splitting them means the
+# production deployment policy is a file you can read on its own rather than a conditional
+# buried in a template, and it survives the day prd moves to a second ArgoCD instance.
+#
+# How a product lands on the right cluster:
+#
+#   git directories   products/*/rendered/*        ->  products/add/rendered/tst
+#                                                          |       |          |
+#                     matrix feeds the basename ("tst") into the cluster generator's selector
+#                                                                             |
+#   clusters          prometeo.iag.ai/rung: tst    ->  the tst spoke's cluster Secret
+#
+# So the environment a directory is named after is the environment it deploys to, and there is
+# nowhere to write that mapping down wrongly. A rung with no registered cluster generates no
+# Application at all rather than deploying somewhere unintended.
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
   name: prometeo-products
   namespace: argocd
 spec:
+  goTemplate: true
+  # An Application generated here owns Crossplane composite resources -- a database, a bucket,
+  # an IAM role. So the ApplicationSet is not allowed to delete one:
+  #
+  #   applicationsSync: create-update      it creates and updates, never deletes
+  #   preserveResourcesOnDeletion: true    and deleting this ApplicationSet, or an Application
+  #                                        under it, leaves the resources alone
+  #
+  # Without these, a directory disappearing from git -- a rename, a bad merge, a rung whose
+  # cluster is briefly unregistered -- would take a production database with it. Removing a
+  # product stays possible; it just has to be somebody deciding to, rather than a side effect.
+  syncPolicy:
+    applicationsSync: create-update
+    preserveResourcesOnDeletion: true
+  goTemplateOptions: ["missingkey=error"]
   generators:
-    - git:
-        repoURL: https://github.com/crossplane-poc/prometeo-products.git
-        revision: main
-        directories:
-          - path: products/*/base
+    - matrix:
+        generators:
+          - git:
+              repoURL: https://github.com/crossplane-poc/prometeo-products.git
+              revision: main
+              directories:
+                - path: products/*/rendered/*
+                - path: products/*/rendered/prd
+                  exclude: true
+          - clusters:
+              selector:
+                matchLabels:
+                  prometeo.iag.ai/rung: '{{ .path.basename }}'
   template:
     metadata:
-      name: 'prometeo-{{path[1]}}-sb3'
+      name: 'prometeo-{{ index .path.segments 1 }}-{{ .path.basename }}'
+      labels:
+        prometeo.iag.ai/product: '{{ index .path.segments 1 }}'
+        prometeo.iag.ai/rung: '{{ .path.basename }}'
     spec:
-      project: prometeo-products
+      project: 'prometeo-{{ .path.basename }}'
       source:
         repoURL: https://github.com/crossplane-poc/prometeo-products.git
         targetRevision: main
-        path: '{{path}}'
-        # Plain manifests, not Kustomize — each component template drops a self-contained
-        # Namespace+XR file here with no shared resources: list to keep in sync, on purpose (see
-        # commit message). ArgoCD applies every yaml file in the directory directly.
+        # Plain manifests, rendered by tools/render.py in that repo and committed. No Kustomize
+        # and no Helm here on purpose: what a promotion pull request shows is exactly what gets
+        # applied, with nothing evaluated between review and apply.
+        path: '{{ .path.path }}'
         directory:
           recurse: false
       destination:
-        server: https://kubernetes.default.svc
+        name: '{{ .name }}'
       syncPolicy:
-        # No `automated:` block, on purpose — merging a product's PR must not deploy it. Sync is
-        # a manual, deliberate action (ArgoCD UI/CLI or Backstage's ArgoCD plugin), not a side
-        # effect of a merge.
+        # dev, tst and uat deploy themselves once a promotion is merged. The gate on these rungs
+        # is the pull request, not the sync -- a second manual step here would just be a button
+        # nobody reads. prd is the opposite, and lives in the other file.
+        automated:
+          selfHeal: true
+          prune: true
         syncOptions:
-          - CreateNamespace=true
           - ServerSideApply=true
         retry:
           limit: -1
