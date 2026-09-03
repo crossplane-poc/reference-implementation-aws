@@ -139,7 +139,9 @@ spec:
           spec:
             componentsRevision: HEAD
             components: ["*"]
-            images: {}
+            # Block form, not `{}`: the service template and tools/set_image.py both append
+            # a service under this key, and neither can append to a flow mapping.
+            images:
             promotedFrom: null
 
     - id: write-overrides
