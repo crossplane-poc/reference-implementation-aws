@@ -63,7 +63,7 @@ spec:
           **Merging this PR deletes the live infrastructure. This cannot be undone.**
         filesToDelete:
           - products/${{ parameters.product | parseEntityRef | pick('name') }}/base/${{ parameters.component | parseEntityRef | pick('name') }}.yaml
-          - products/${{ parameters.product | parseEntityRef | pick('name') }}/components/${{ parameters.component | parseEntityRef | pick('name') }}.yaml
+          - products/${{ parameters.product | parseEntityRef | pick('name') }}/catalog/${{ parameters.component | parseEntityRef | pick('name') }}.yaml
 
   output:
     links:
