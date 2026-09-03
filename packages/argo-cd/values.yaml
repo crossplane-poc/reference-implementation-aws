@@ -161,6 +161,17 @@ configs:
             return health_status
   params:
     server.insecure: true
+    # Make `spec.syncPolicy.applicationsSync` on an ApplicationSet mean something.
+    #
+    # Without this the controller runs its global policy (sync: create, update AND delete) and
+    # silently ignores what an individual ApplicationSet declares. On 2026-09-03 that cost us
+    # the platform: prometeo-platform's cluster selector moved to prometeo.iag.ai/rung, the
+    # External Secret that writes that label onto the hub's cluster Secret had not caught up,
+    # the generator matched nothing for ten seconds, and the controller deleted the Application
+    # that owns the XRDs. Deleting an XRD deletes its CRD, which deletes every composite
+    # resource of that kind -- the whole ADD product. The `applicationsSync: create-update` the
+    # ApplicationSet asked for would have prevented it and was ignored.
+    applicationsetcontroller.enable.policy.override: "true"
   rbac:
     policy.csv: |
       g, superuser, role:admin
