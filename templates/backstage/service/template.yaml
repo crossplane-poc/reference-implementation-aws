@@ -410,7 +410,7 @@ spec:
             replaceWith: "\n  images:\n    ${{ parameters.name }}:\n      repository: ${{ parameters.imageRepository }}/${{ parameters.name }}\n      tag: \"${{ parameters.imageTag }}\""
           - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/envs/dev/release.yaml
             matchRegex: true
-            find: '\n  images:\n(?![\s\S]*\n    ${{ parameters.name }}:)'
+            find: '\n  images:\n(?!(?:[\s\S]*\n)?    ${{ parameters.name }}:)'
             replaceWith: "\n  images:\n    ${{ parameters.name }}:\n      repository: ${{ parameters.imageRepository }}/${{ parameters.name }}\n      tag: \"${{ parameters.imageTag }}\"\n"
 
     # Same for the database, whose access list is service names rather than objects.
