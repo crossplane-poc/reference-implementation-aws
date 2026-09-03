@@ -45,8 +45,19 @@ spec:
           version = "~> 6.28.0"
         }
         kubernetes = {
-          source  = "hashicorp/kubernetes"
-          version = "~> 2.38"
+          source = "hashicorp/kubernetes"
+          # Held below 2.38. That release added Terraform resource identity, and with
+          # Terraform 1.13.5 kubernetes_ingress_v1 writes a null identity on create and
+          # returns a populated one on read, so every subsequent plan fails:
+          #
+          #   Unexpected Identity Change: During the read operation, the Terraform Provider
+          #   unexpectedly returned a different identity then the previously stored one.
+          #
+          # The apply succeeds -- the Deployment, Service and Ingress are all created and the
+          # pods run -- and then the workspace can never observe itself again, so it retries
+          # forever and never reports Ready. Every AppService with an ingress, which is every
+          # frontend, is affected.
+          version = "~> 2.37.0"
         }
         helm = {
           source  = "hashicorp/helm"
