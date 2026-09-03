@@ -59,7 +59,7 @@ spec:
             Individual services are not promoted separately.
 
             Sizing is not promoted. The target environment keeps its own replica counts,
-            database size and retention (envs/<env>/config.yaml).
+            database size and retention (envs/<env>/overrides.yaml).
 
             This opens a pull request. Nothing is deployed until it is merged, and prd is not
             deployed even then -- prd is synced by hand.

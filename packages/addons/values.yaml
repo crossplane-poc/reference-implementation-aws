@@ -296,7 +296,16 @@ crossplane-compositions:
 # The selector is the rung label on the cluster Secret. dev resolves to the hub cluster today,
 # because the PoC has one cluster; the other three resolve to nothing until those clusters are
 # registered, and generate no Application in the meantime.
-prometeo-platform-dev:
+#
+# dev's key is `prometeo-platform`, not `prometeo-platform-dev`, and that asymmetry is
+# deliberate. The key names the ApplicationSet, and this one already exists on the cluster
+# owning the XRDs and Compositions. Renaming it would delete that ApplicationSet and -- because
+# the addons chart sets preserveResourcesOnDeletion: false -- cascade into deleting the XRDs,
+# which removes their CRDs, which deletes every composite resource in every product namespace
+# and destroys the AWS infrastructure behind them. Keeping the key turns the migration into an
+# in-place change of `path`. The three new rungs are new either way, so they are named for
+# their rung.
+prometeo-platform:
   enabled: true
   namespace: crossplane-system
   type: manifest

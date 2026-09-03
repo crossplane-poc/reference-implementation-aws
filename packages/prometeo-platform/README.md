@@ -5,7 +5,8 @@ The Crossplane layer that turns a manifest in
 infrastructure.
 
 ArgoCD syncs **`environments/<rung>/`**, not this directory directly — one Application per rung,
-wired as `prometeo-platform-<rung>` in `packages/addons/values.yaml` and selected by the
+wired in `packages/addons/values.yaml` -- `prometeo-platform` for dev, `prometeo-platform-<rung>`
+for the rest -- and selected by the
 `prometeo.iag.ai/rung` label on the cluster's ArgoCD Secret. Today only `dev` resolves, to the sb3
 control plane (`ims-eu-west-1`, account `515048895486`); the other three generate no Application
 until those clusters are registered.

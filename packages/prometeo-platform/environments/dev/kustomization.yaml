@@ -10,7 +10,9 @@
 # root ../../kustomization.yaml still builds the platform on its own, without an
 # EnvironmentConfig -- useful for a diff, not something to sync.
 #
-# Wired in packages/addons/values.yaml as prometeo-platform-dev, selected by the
+# Wired in packages/addons/values.yaml as prometeo-platform (dev keeps the original key so
+# the ApplicationSet that owns the XRDs is updated in place rather than recreated), selected
+# by the
 # prometeo.iag.ai/rung label on the ArgoCD cluster Secret.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization

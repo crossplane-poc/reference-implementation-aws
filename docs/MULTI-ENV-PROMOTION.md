@@ -348,6 +348,21 @@ to write it.
 Nothing below deploys anything by itself. Steps 1–3 are needed for the model to work on the
 existing single cluster; 4–6 are what adding a real environment looks like.
 
+**0. Orphan the Applications that are about to be renamed.** The existing `prometeo-<product>-sb3`
+Applications carry `resources-finalizer.argocd.argoproj.io`, and the ApplicationSet that generated
+them does not set `preserveResourcesOnDeletion`. Their names change (the rung is in the name), so
+they stop being generated and are deleted -- taking the product's composite resources, and the AWS
+infrastructure behind them, with them. Strip the finalizer first, let the new Applications adopt
+the resources, then delete the old ones with `--cascade=orphan`:
+
+```sh
+kubectl patch app prometeo-add-sb3 -n argocd --type=json \
+  -p '[{"op":"remove","path":"/metadata/finalizers"}]'
+```
+
+The platform ApplicationSet needs no such care, because dev keeps the key `prometeo-platform`
+in `packages/addons/values.yaml` -- see the comment there.
+
 **1. Merge the two pull requests.**
 [`prometeo-products#46`](https://github.com/crossplane-poc/prometeo-products/pull/46) (layout,
 tooling, workflows) and the matching one here (platform, ApplicationSets, Backstage template).
@@ -359,7 +374,7 @@ the promote workflow runs unattended, which is the one thing the design assumes 
 **3. Set branch protection on `main`** with "require review from Code Owners", so `CODEOWNERS` has
 force. Allow the auto-merge bot to bypass it for the dev-only path set.
 
-**4. Check what dev renders.** `prometeo-platform-dev` should sync onto the hub and produce the
+**4. Check what dev renders.** `prometeo-platform` should sync onto the hub and produce the
 same 22 resources it does today, plus the `image`/`replicas` fields on the `AppService` XRD:
 
 ```sh
