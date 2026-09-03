@@ -320,14 +320,40 @@ and waits for a person to sync it.
 
 ## 7. Who may promote what
 
-Four independent gates, none of which this repository can talk its way past:
+Four independent gates, none of which this repository can talk its way past -- **two of which
+are switched off in the `crossplane-poc` organization, and it is worth being exact about which**:
 
-| gate | where | stops |
-|---|---|---|
-| **GitHub Environment** on the promote job | `.github/workflows/promote.yaml` | starting a uat/prd promotion without an approver |
-| **CODEOWNERS** on `envs/prd/` | `prometeo-products/CODEOWNERS` | merging a prd promotion without a second team |
-| **Auto-merge is dev-only** | `.github/workflows/automerge.yml` | a bot merging anything above dev |
-| **AppProject per rung** | `packages/argo-cd/manifests/appproject-prometeo-*.yaml` | an Application for tst deploying to prd's cluster |
+| gate | where | stops | enforced in crossplane-poc? |
+|---|---|---|---|
+| **GitHub Environment** on the promote job | `.github/workflows/promote.yaml` | starting a uat/prd promotion without an approver | **no** |
+| **CODEOWNERS** on `envs/prd/` | `prometeo-products/CODEOWNERS` | merging a prd promotion without a second team | **no** |
+| **Auto-merge is dev-only** | `.github/workflows/automerge.yml` | a bot merging anything above dev | yes |
+| **AppProject per rung** | `packages/argo-cd/manifests/appproject-prometeo-*.yaml` | an Application for tst deploying to prd's cluster | yes |
+
+The first two need a paid plan. `prometeo-products` is a private repository in a free
+organization, where branch protection and rulesets are unavailable (`"Upgrade to GitHub Pro or
+make this repository public to enable this feature"`), environment protection rules cannot be
+added, and a CODEOWNERS file is not read at all. The environments `tst`, `uat` and `prd` exist and
+the workflow's `environment:` line is correct; nothing is waiting behind them. Both switch on with
+no change to this repository the day the repository is public, the organization is on Team, or the
+work moves to the paid organization it will really live in.
+
+The two that hold are the two that are code rather than settings, which is not a coincidence.
+
+**What actually protects production here** is neither of the GitHub gates:
+
+- **prd has no `automated:` block.** Merging a prd promotion does not deploy it; the Application
+  goes `OutOfSync` and stays there until a person presses sync. That is enforced by
+  `applicationset-prometeo-products-prd.yaml`, not by a repository setting.
+- **ArgoCD's own RBAC decides who that person is.** `argocd-rbac-cm` sets `policy.default` to
+  empty, so a user matching no group has no permissions at all; `superuser` maps to `role:admin`
+  and `backstage` to `role:readonly`. Syncing prd therefore requires membership of the `superuser`
+  group in Keycloak, and the audit trail is ArgoCD's, tied to an SSO identity.
+
+So the honest summary for the PoC: **anyone with write access can merge a promotion into prd, and
+only the `superuser` group can make it real.** If you want the approval to happen earlier than
+that -- at the pull request rather than at the sync -- it costs either a public repository or a
+paid plan.
 
 Plus two properties of the design itself:
 
@@ -390,12 +416,18 @@ decoration.
 [`prometeo-products#46`](https://github.com/crossplane-poc/prometeo-products/pull/46) (layout,
 tooling, workflows) and the matching one here (platform, ApplicationSets, Backstage template).
 
-**2. Create the GitHub Environments.** In `crossplane-poc/prometeo-products` → Settings →
-Environments, create `tst`, `uat`, `prd`. Add required reviewers to `uat` and `prd`. Without this
-the promote workflow runs unattended, which is the one thing the design assumes it will not do.
+**2. Allow Actions to open pull requests.** Settings → Actions → General → Workflow permissions →
+"Allow GitHub Actions to create and approve pull requests". `promote.yaml` ends in `gh pr create`
+using `GITHUB_TOKEN`; without this every promotion runs, commits, pushes its branch and then fails
+on the last line. Leave *Default workflow permissions* on read -- each workflow declares what it
+needs.
 
-**3. Set branch protection on `main`** with "require review from Code Owners", so `CODEOWNERS` has
-force. Allow the auto-merge bot to bypass it for the dev-only path set.
+**3. Create the GitHub Environments.** Settings → Environments: `tst`, `uat`, `prd`. On a paid
+plan (or a public repository) add required reviewers to `uat` and `prd`; that is what makes the
+promote job wait for a person. In a free organization with a private repository the environments
+can be created but carry no protection rules, and the same is true of branch protection and
+CODEOWNERS -- see §7 for what still holds when they are unavailable, and do not assume the
+approval exists because the `environment:` line is in the workflow.
 
 **4. Check what dev renders.** `prometeo-platform` should sync onto the hub and produce the
 same 22 resources it does today, plus the `image`/`replicas` fields on the `AppService` XRD:
