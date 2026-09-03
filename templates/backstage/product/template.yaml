@@ -183,6 +183,12 @@ spec:
             annotations:
               backstage.io/kubernetes-label-selector: 'product=${{ parameters.name }},platform=prometeo'
               backstage.io/kubernetes-namespace: ${{ parameters.name }}
+              # One ArgoCD Application per (product, rung), each labelled by the
+              # ApplicationSet, so this selector is the environment ladder: the card lists
+              # dev, tst, uat and prd with each one's sync state and health. A rung with no
+              # cluster registered generates no Application and simply does not appear, which
+              # is the honest answer rather than a row claiming to be healthy.
+              argocd/app-selector: prometeo.iag.ai/product=${{ parameters.name }}
           spec:
             owner: guests
             lifecycle: experimental

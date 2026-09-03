@@ -349,7 +349,15 @@ spec:
             name: ${{ parameters.name }}
             description: ${{ ('Service ' + parameters.name + ' (product ' + (parameters.product | parseEntityRef | pick('name')) + ')') | dump }}
             annotations:
-              backstage.io/kubernetes-namespace: ${{ parameters.product | parseEntityRef | pick('name') }}
+              # The service's own namespace, not the product's. The product namespace holds
+              # the composite resources and their Workspaces -- control-plane objects. The
+              # pods run here, so this is what makes the Kubernetes card show a Deployment
+              # rather than a Crossplane XR.
+              backstage.io/kubernetes-namespace: ${{ parameters.name }}
+              # Matches the label Terraform puts on the Deployment, Service and pods.
+              backstage.io/kubernetes-label-selector: 'app=${{ parameters.name }}'
+              # The rungs its product is deployed to, and the state of each.
+              argocd/app-selector: prometeo.iag.ai/product=${{ parameters.product | parseEntityRef | pick('name') }}
               iag.ai/repo: ${{ parameters.repo | dump }}
               # Read back by this same template when another service picks this one under
               # "services this one may call". Without it that lookup falls back to 8000.
