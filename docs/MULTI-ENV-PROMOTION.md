@@ -371,6 +371,21 @@ the object in place until someone runs `kubectl delete appproject prometeo-produ
 The platform ApplicationSet needs no such care: dev keeps the key `prometeo-platform` in
 `packages/addons/values.yaml`, so it is updated in place rather than recreated.
 
+**0b. Two things that make an ApplicationSet dangerous here.** Both were found the hard way.
+
+*A selector can only be changed after the label exists.* `prometeo-platform`'s cluster selector
+moved from `environment: control-plane` to `prometeo.iag.ai/rung: dev`, and that label is written
+onto the hub's cluster Secret by an External Secret. For the ten seconds between the
+ApplicationSet updating and External Secrets catching up, the generator matched no cluster, so the
+controller deleted the Application -- and its finalizer took the XRDs with it. Land the label
+first, in its own change, and only then point a selector at it.
+
+*`applicationsSync` is ignored by default.* The ApplicationSet controller runs a global policy
+(`sync`: create, update and delete) and does not read `spec.syncPolicy.applicationsSync` unless it
+is started with `--enable-policy-override`. That parameter is now set in
+`packages/argo-cd/values.yaml`; without it the `create-update` on every ApplicationSet here is
+decoration.
+
 **1. Merge the two pull requests.**
 [`prometeo-products#46`](https://github.com/crossplane-poc/prometeo-products/pull/46) (layout,
 tooling, workflows) and the matching one here (platform, ApplicationSets, Backstage template).
