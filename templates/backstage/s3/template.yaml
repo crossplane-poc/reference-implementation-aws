@@ -108,7 +108,7 @@ spec:
       name: Write the Backstage Resource entity
       action: roadiehq:utils:fs:write
       input:
-        path: products/${{ parameters.product | parseEntityRef | pick('name') }}/components/${{ parameters.name }}.yaml
+        path: products/${{ parameters.product | parseEntityRef | pick('name') }}/catalog/${{ parameters.name }}.yaml
         content: |-
           apiVersion: backstage.io/v1alpha1
           kind: Resource

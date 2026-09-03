@@ -110,6 +110,63 @@ spec:
             # spec.sso.clientId by hand.
             sso: {}
 
+    - id: write-release
+      name: Write dev's Release
+      action: roadiehq:utils:fs:write
+      input:
+        path: products/${{ parameters.name }}/envs/dev/release.yaml
+        content: |-
+          # Release -- what dev runs.
+          #
+          # dev is the bottom of the ladder and the only rung that is not promoted into:
+          #   * componentsRevision: HEAD -- it tracks the tip of main, so a merged Backstage
+          #     pull request is live in dev on the next render, with no promotion step.
+          #   * components: ["*"] -- every component in base/. Scaffolding a new one stays
+          #     "drop a file"; nothing has to be appended to a list.
+          #   * images -- written here by each service repository's build pipeline.
+          #
+          # Empty until a build pins something. A service with no image renders without one,
+          # and the composition creates no Deployment for it, which is the right state for a
+          # service nothing has built yet.
+          #
+          # Without this file the product renders nothing, no rendered/dev/ exists, and the
+          # ApplicationSet generates no Application. It is what makes a product deployable.
+          apiVersion: prometeo.iag.ai/v1alpha1
+          kind: Release
+          metadata:
+            product: ${{ parameters.name }}
+            environment: dev
+          spec:
+            componentsRevision: HEAD
+            components: ["*"]
+            images: {}
+            promotedFrom: null
+
+    - id: write-overrides
+      name: Write dev's environment-local configuration
+      action: roadiehq:utils:fs:write
+      input:
+        path: products/${{ parameters.name }}/envs/dev/overrides.yaml
+        content: |-
+          # Environment-local configuration for dev -- how big ${{ parameters.name }} is here.
+          #
+          # NEVER PROMOTED. tools/promote.py copies release.yaml between rungs and leaves this
+          # file alone, because replica counts, database sizes and retention windows are
+          # properties of the environment, not of the release.
+          #
+          # An empty list is a valid answer: it means dev is happy with the defaults in the
+          # component files and the cluster's EnvironmentConfig. Application configuration
+          # goes here too -- a patch of spec.env on an AppService becomes that service's
+          # <name>-envs ConfigMap, so log levels and feature flags cannot ride a release
+          # into production.
+          apiVersion: prometeo.iag.ai/v1alpha1
+          kind: EnvironmentConfig
+          metadata:
+            product: ${{ parameters.name }}
+            environment: dev
+          spec:
+            overrides: []
+
     - id: write-catalog-info
       name: Write the Backstage System entity
       action: roadiehq:utils:fs:write
