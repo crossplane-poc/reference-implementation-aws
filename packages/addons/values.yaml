@@ -309,6 +309,12 @@ prometeo-platform:
   enabled: true
   namespace: crossplane-system
   type: manifest
+  # This ApplicationSet owns the XRDs. Deleting an XRD deletes its CRD, which deletes
+  # every composite resource of that kind in every namespace, which destroys the AWS
+  # infrastructure behind them. Overrides the chart default of false.
+  syncPolicyAppSet:
+    applicationsSync: create-update
+    preserveResourcesOnDeletion: true
   path: packages/prometeo-platform/environments/dev
   selector:
     matchExpressions:
@@ -320,6 +326,12 @@ prometeo-platform-tst:
   enabled: true
   namespace: crossplane-system
   type: manifest
+  # This ApplicationSet owns the XRDs. Deleting an XRD deletes its CRD, which deletes
+  # every composite resource of that kind in every namespace, which destroys the AWS
+  # infrastructure behind them. Overrides the chart default of false.
+  syncPolicyAppSet:
+    applicationsSync: create-update
+    preserveResourcesOnDeletion: true
   path: packages/prometeo-platform/environments/tst
   selector:
     matchExpressions:
@@ -331,6 +343,12 @@ prometeo-platform-uat:
   enabled: true
   namespace: crossplane-system
   type: manifest
+  # This ApplicationSet owns the XRDs. Deleting an XRD deletes its CRD, which deletes
+  # every composite resource of that kind in every namespace, which destroys the AWS
+  # infrastructure behind them. Overrides the chart default of false.
+  syncPolicyAppSet:
+    applicationsSync: create-update
+    preserveResourcesOnDeletion: true
   path: packages/prometeo-platform/environments/uat
   selector:
     matchExpressions:
@@ -342,6 +360,12 @@ prometeo-platform-prd:
   enabled: true
   namespace: crossplane-system
   type: manifest
+  # This ApplicationSet owns the XRDs. Deleting an XRD deletes its CRD, which deletes
+  # every composite resource of that kind in every namespace, which destroys the AWS
+  # infrastructure behind them. Overrides the chart default of false.
+  syncPolicyAppSet:
+    applicationsSync: create-update
+    preserveResourcesOnDeletion: true
   path: packages/prometeo-platform/environments/prd
   selector:
     matchExpressions:

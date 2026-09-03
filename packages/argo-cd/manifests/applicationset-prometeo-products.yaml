@@ -23,6 +23,19 @@ metadata:
   namespace: argocd
 spec:
   goTemplate: true
+  # An Application generated here owns Crossplane composite resources -- a database, a bucket,
+  # an IAM role. So the ApplicationSet is not allowed to delete one:
+  #
+  #   applicationsSync: create-update      it creates and updates, never deletes
+  #   preserveResourcesOnDeletion: true    and deleting this ApplicationSet, or an Application
+  #                                        under it, leaves the resources alone
+  #
+  # Without these, a directory disappearing from git -- a rename, a bad merge, a rung whose
+  # cluster is briefly unregistered -- would take a production database with it. Removing a
+  # product stays possible; it just has to be somebody deciding to, rather than a side effect.
+  syncPolicy:
+    applicationsSync: create-update
+    preserveResourcesOnDeletion: true
   goTemplateOptions: ["missingkey=error"]
   generators:
     - matrix:

@@ -3,6 +3,12 @@
 # PLACEHOLDER: the accounts and clusters do not exist yet. Endpoints, CA data and role ARNs are
 # REPLACE_ME. Everything structural is real -- this is the shape these Secrets take, not a sketch.
 #
+# It lives here rather than in ../manifests/ because that directory is a source of the
+# `argocd-<cluster>` Application: anything in it is applied to the hub automatically. Registering
+# three clusters whose endpoints are REPLACE_ME would generate a fistful of Applications that can
+# never connect. Move this file into ../manifests/ once the values below are real, and the rungs
+# come up on their own.
+#
 # There is no credential in any of these. `awsAuthConfig` tells ArgoCD to call
 # `eks:DescribeCluster` and then assume `roleARN` in the workload account to mint a short-lived
 # token for each request. So:

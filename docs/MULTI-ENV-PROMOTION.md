@@ -348,20 +348,28 @@ to write it.
 Nothing below deploys anything by itself. Steps 1–3 are needed for the model to work on the
 existing single cluster; 4–6 are what adding a real environment looks like.
 
-**0. Orphan the Applications that are about to be renamed.** The existing `prometeo-<product>-sb3`
-Applications carry `resources-finalizer.argocd.argoproj.io`, and the ApplicationSet that generated
-them does not set `preserveResourcesOnDeletion`. Their names change (the rung is in the name), so
-they stop being generated and are deleted -- taking the product's composite resources, and the AWS
-infrastructure behind them, with them. Strip the finalizer first, let the new Applications adopt
-the resources, then delete the old ones with `--cascade=orphan`:
+**0. Retire the sb3-era Applications.** The Applications on the hub today are named
+`prometeo-<product>-sb3` and come from `products/<p>/base`. Both change here, so they stop being
+generated. They carry `resources-finalizer.argocd.argoproj.io`, so deleting one deletes the
+composite resources it tracks -- the product's database and buckets with them.
+
+The ApplicationSets now set `applicationsSync: create-update`, so the controller will not delete
+them for you. After the merge, once `prometeo-<product>-dev` is Synced and has adopted the
+resources, retire the old ones by hand -- finalizer first, then the Application:
 
 ```sh
 kubectl patch app prometeo-add-sb3 -n argocd --type=json \
   -p '[{"op":"remove","path":"/metadata/finalizers"}]'
+kubectl delete app prometeo-add-sb3 -n argocd
 ```
 
-The platform ApplicationSet needs no such care, because dev keeps the key `prometeo-platform`
-in `packages/addons/values.yaml` -- see the comment there.
+Only then delete the old `prometeo-products` AppProject: it also carries the finalizer, and
+deleting a project deletes the Applications inside it. Nothing prunes it for you -- the hub's
+`argocd-<cluster>` Application syncs with `prune: false` -- so removing the file from git leaves
+the object in place until someone runs `kubectl delete appproject prometeo-products -n argocd`.
+
+The platform ApplicationSet needs no such care: dev keeps the key `prometeo-platform` in
+`packages/addons/values.yaml`, so it is updated in place rather than recreated.
 
 **1. Merge the two pull requests.**
 [`prometeo-products#46`](https://github.com/crossplane-poc/prometeo-products/pull/46) (layout,
@@ -390,7 +398,9 @@ diff <(kubectl kustomize packages/prometeo-platform/environments/dev) \
   `packages/prometeo-platform/environments/<rung>/environment.yaml`;
 - create `prometeo-argocd-deployer` in that account, trusting the hub's ArgoCD role, and map it in
   the cluster's `aws-auth` / access entries;
-- fill in the endpoint and CA in `packages/argo-cd/manifests/clusters-prometeo-spokes.yaml`.
+- fill in the endpoint and CA in `packages/argo-cd/spoke-clusters/clusters-prometeo-spokes.yaml`
+  and move it into `packages/argo-cd/manifests/`, which the hub's `argocd-<cluster>` Application
+  applies.
 
 The rung's `prometeo-platform-<rung>` Application then appears on its own, because the addon
 selector matches the `prometeo.iag.ai/rung` label — and so do that rung's product Applications.
