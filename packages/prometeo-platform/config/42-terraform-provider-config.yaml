@@ -46,18 +46,18 @@ spec:
         }
         kubernetes = {
           source = "hashicorp/kubernetes"
-          # Held below 2.38. That release added Terraform resource identity, and with
-          # Terraform 1.13.5 kubernetes_ingress_v1 writes a null identity on create and
-          # returns a populated one on read, so every subsequent plan fails:
+          # Must stay compatible with what the modules ask for. bootstrap-service declares
+          # `~> 2.38` in its own versions.tf, so a constraint below that leaves terraform with
+          # an empty intersection and every workspace fails at init, not at plan:
           #
-          #   Unexpected Identity Change: During the read operation, the Terraform Provider
-          #   unexpectedly returned a different identity then the previously stored one.
+          #   no available releases match the given constraints ~> 2.37.0, ~> 2.38
           #
-          # The apply succeeds -- the Deployment, Service and Ingress are all created and the
-          # pods run -- and then the workspace can never observe itself again, so it retries
-          # forever and never reports Ready. Every AppService with an ingress, which is every
-          # frontend, is affected.
-          version = "~> 2.37.0"
+          # Which is worse than the bug pinning down was meant to avoid. 2.38 carries a
+          # kubernetes_ingress_v1 that writes a null identity on create and returns a real one
+          # on read, so a service with an ingress applies correctly and then never observes
+          # itself again. Fixing that properly means moving the module's constraint first, or
+          # waiting for the provider.
+          version = "~> 2.38"
         }
         helm = {
           source  = "hashicorp/helm"
