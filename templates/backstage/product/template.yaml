@@ -123,11 +123,10 @@ spec:
           #     pull request is live in dev on the next render, with no promotion step.
           #   * components: ["*"] -- every component in base/. Scaffolding a new one stays
           #     "drop a file"; nothing has to be appended to a list.
-          #   * images -- written here by each service repository's build pipeline.
           #
-          # Empty until a build pins something. A service with no image renders without one,
-          # and the composition creates no Deployment for it, which is the right state for a
-          # service nothing has built yet.
+          # Images are not here. A component file carries its own, and every rung above dev
+          # pins a commit -- so the image a rung runs is the one base/ had at that commit, and
+          # it travels with the promotion instead of being copied alongside it.
           #
           # Without this file the product renders nothing, no rendered/dev/ exists, and the
           # ApplicationSet generates no Application. It is what makes a product deployable.
@@ -139,9 +138,6 @@ spec:
           spec:
             componentsRevision: HEAD
             components: ["*"]
-            # Block form, not `{}`: the service template and tools/set_image.py both append
-            # a service under this key, and neither can append to a flow mapping.
-            images:
             promotedFrom: null
 
     - id: write-overrides

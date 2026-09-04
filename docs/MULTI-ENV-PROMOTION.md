@@ -31,7 +31,8 @@ this product look like **here**"*. Two things have to move between environments 
 
 - **the components** — the services, databases and buckets a product is made of, and their
   settings;
-- **the image versions** — which build of each service is running.
+- **the image versions** — which build of each service is running. These live in the component
+  files, so they move with the components rather than separately.
 
 And two things must *not* move: the environment's own facts (account, VPC, domain) and its own
 settings — replicas, database size, retention, log level, feature flags. Production must not
@@ -64,7 +65,7 @@ flowchart TB
         PRD["prd<br/>444455556666"]
     end
 
-    SVC -->|"pins image digest in dev"| PROD
+    SVC -->|"pins image in base/"| PROD
     BS -->|"opens PRs"| PROD
     BS -->|"triggers promotion"| PROD
     PROD -->|"watched by"| ARGO
@@ -122,8 +123,8 @@ So each environment needs three inputs, and produces one output:
 
 | file | holds | who writes it | promoted? |
 |---|---|---|---|
-| `products/<p>/base/*.yaml` | what the product is made of | Backstage | — |
-| `products/<p>/envs/<e>/release.yaml` | **what this environment runs** | `promote.py`; build pipelines in dev only | **yes, as one unit** |
+| `products/<p>/base/*.yaml` | what the product is made of, images included | Backstage; build pipelines | with the commit |
+| `products/<p>/envs/<e>/release.yaml` | **which commit of `base/`, and which components** | `promote.py` | **yes, as one unit** |
 | `products/<p>/envs/<e>/overrides.yaml` | how big it is here, and how it is configured here | a person | **never** |
 | `products/<p>/rendered/<e>/*.yaml` | what ArgoCD applies | `render.py` | output |
 
@@ -134,13 +135,10 @@ So each environment needs three inputs, and produces one output:
 spec:
   componentsRevision: 6b94535…        # which commit's component files
   components: [backend, database, frontend, kosbackend, media, namespace, product, statics]
-  images:
-    backend:  { repository: …/ims/add-be, tag: "2.2.0", digest: "sha256:03def9a4…" }
-    frontend: { repository: …/ims/add-fe, tag: "1.9.2", digest: "sha256:ef10284d…" }
   promotedFrom: { environment: dev, release: a5fd44d7c70a, at: …, by: albert }
 ```
 
-Three things worth noticing:
+Two fields, and both matter:
 
 **`componentsRevision` is pinned.** tst renders the component files *as they were at that commit*,
 not as they are on `main` today. Without this, editing `base/backend.yaml` would change
@@ -149,12 +147,21 @@ at all. With it, an edit is live in dev immediately and reaches tst only when so
 
 That pin is also what makes it safe to keep auto-merging Backstage's pull requests.
 
-**Images are pinned by digest.** A tag is a label someone can move; `:dev` moves every build. The
-digest is the bytes that passed the rung below. Promoting copies the digest, so "tested in tst" and
-"running in prd" are the same artefact, provably.
+**The image comes with the commit.** It is not recorded here. A component file carries its own
+`spec.image`, so pinning the commit pins the image — tst runs the image `base/` held at tst's
+commit. Build pipelines write that field with a digest as well as a tag: a tag is a label someone
+can move, `:dev` moves every build, and the digest is the bytes that passed the rung below. So
+"tested in tst" and "running in prd" are the same artefact, provably, and the Release does not
+have to say so twice.
+
+An earlier version of this design recorded an image map here as well. It was redundant the moment
+`componentsRevision` existed, and the duplication cost more than it was worth: a renderer that had
+to know which kinds carry images (and silently dropped the pin for kinds it did not know), an
+empty map that the build tooling could not parse, and a scaffolder editing YAML with regular
+expressions.
 
 **It moves whole.** You cannot promote just the frontend. The combination of component set and
-image versions is what was tested one rung down; promoting a subset deploys a combination nobody
+the images they carry is what was tested one rung down; promoting a subset deploys a combination nobody
 has ever run. This is a deliberate constraint and the most likely thing someone will push back on —
 see the alternatives document.
 
@@ -216,7 +223,7 @@ running?*
 |---|---|---|---|---|
 | **cluster facts** | `environments/<rung>/environment.yaml` (this repo) | platform | account, VPC, subnets, `dnsDomain`, Cognito pool, default sizes | n/a — one per cluster |
 | **per-product, per-environment** | `products/<p>/envs/<e>/overrides.yaml` | the product team | replicas, ACUs, retention days, log level, feature flags | **never** |
-| **the release** | `products/<p>/envs/<e>/release.yaml` | `promote.py` | component set, image digests, `componentsRevision` | **yes, whole** |
+| **the release** | `products/<p>/envs/<e>/release.yaml` | `promote.py` | component set and `componentsRevision` | **yes, whole** |
 
 The first layer is why a component manifest names no environment: bucket names, role paths and
 ingress hosts are all derived from the cluster's `EnvironmentConfig` at apply time. Nothing to
@@ -297,8 +304,11 @@ tools/set_image.py --product add --service backend \
   --tag 2.3.1 --digest sha256:7fcaadba…
 ```
 
-which pins it in `envs/dev/release.yaml`. The script **refuses any environment but dev** — a build
-pipeline that could write to prd would make the ladder decorative.
+which writes `spec.image` into `base/backend.yaml`. dev renders `base/` at `HEAD`, so the build is
+live in dev on the next render. It reaches no other environment: every rung above dev pins a
+commit, so tst keeps running the image `base/` held at tst's commit until somebody promotes.
+A build pipeline has no way to write to prd, because there is nothing environment-shaped for it
+to write to.
 
 **Someone promotes.** In Backstage: *Promote a product* → product `add`, into `tst`. That
 dispatches the `promote.yaml` workflow, which copies dev's Release onto tst, re-renders, and opens

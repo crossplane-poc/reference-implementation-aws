@@ -65,9 +65,11 @@ spec:
           description: >-
             e.g. "dev-1". Leave it blank if nothing has been built yet -- the service is then
             created without an image and gets no Deployment until a build pins one, which is
-            the correct state rather than a broken one. The pin lands in dev's Release, never
-            in the component file, because a component carrying a tag could not be promoted.
-            Builds replace it with a digest; a tag here is enough to get the service running.
+            the correct state rather than a broken one.
+
+            The pin lives in this component file. dev renders it at HEAD, so it is live
+            immediately; every rung above pins a commit, so the image travels with the
+            promotion rather than being copied separately. Builds replace it with a digest.
     - title: What it connects to
       properties:
         # Two nested objects rather than two checkboxes side by side. A nested object renders as
@@ -293,6 +295,9 @@ spec:
             product: ${{ parameters.product | parseEntityRef | pick('name') }}
             repo: ${{ parameters.repo | dump }}
             containerPort: ${{ parameters.containerPort }}
+          {%- if parameters.imageTag %}
+            image: ${{ parameters.imageRepository }}/${{ parameters.name }}:${{ parameters.imageTag }}
+          {%- endif %}
             modules:
               # Pinned by the platform, not by whoever fills in the form. No released tag accepts
               # the sb3 environment yet: every tag up to v6.5.1 fails the plan with "environment
@@ -387,31 +392,6 @@ spec:
             matchRegex: true
             find: '\nspec:(?![\s\S]*\n  access:)'
             replaceWith: "\nspec:\n  access:\n    - { service: ${{ parameters.name }}, level: ${{ each.value.level }} }"
-
-    # The image goes in dev's Release, not in the component file -- a component carrying a
-    # tag would be the same tag in every environment and could not be promoted. Three anchors,
-    # in this order: replace a pin this service already has, turn an empty `images: {}` into a
-    # block containing it, or insert into a block that has other services but not this one. The
-    # lookahead on the last one is what makes re-running this template overwrite rather than
-    # duplicate the key.
-    - id: pin-image
-      name: Pin the image dev runs
-      if: ${{ parameters.imageTag }}
-      action: roadiehq:utils:fs:replace
-      input:
-        files:
-          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/envs/dev/release.yaml
-            matchRegex: true
-            find: '\n    ${{ parameters.name }}:\n      repository: [^\n]*\n      tag: "[^"]*"\n(      digest: "[^"]*"\n)?'
-            replaceWith: "\n    ${{ parameters.name }}:\n      repository: ${{ parameters.imageRepository }}/${{ parameters.name }}\n      tag: \"${{ parameters.imageTag }}\"\n"
-          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/envs/dev/release.yaml
-            matchRegex: true
-            find: '\n  images: \{\}'
-            replaceWith: "\n  images:\n    ${{ parameters.name }}:\n      repository: ${{ parameters.imageRepository }}/${{ parameters.name }}\n      tag: \"${{ parameters.imageTag }}\""
-          - file: products/${{ parameters.product | parseEntityRef | pick('name') }}/envs/dev/release.yaml
-            matchRegex: true
-            find: '\n  images:\n(?!(?:[\s\S]*\n)?    ${{ parameters.name }}:)'
-            replaceWith: "\n  images:\n    ${{ parameters.name }}:\n      repository: ${{ parameters.imageRepository }}/${{ parameters.name }}\n      tag: \"${{ parameters.imageTag }}\"\n"
 
     # Same for the database, whose access list is service names rather than objects.
     - id: grant-database-access
