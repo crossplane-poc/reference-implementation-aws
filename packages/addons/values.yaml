@@ -174,7 +174,7 @@ backstage:
         catalog:
           locations:
             - type: url
-              target: '{{ .metadata.annotations.addons_repo_url }}/blob/{{ .metadata.annotations.addons_repo_revision }}/archive/prometeo-platform-poc/templates-backstage/catalog-info.yaml'
+              target: '{{ .metadata.annotations.addons_repo_url }}/blob/{{ .metadata.annotations.addons_repo_revision }}/packages/atlas-platform-poc/catalog-info.yaml'
       extraEnvVars:
       - name: BACKSTAGE_FRONTEND_URL
         value: 'https://{{ if eq .metadata.labels.path_routing "false" }}backstage.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}{{ end }}'
