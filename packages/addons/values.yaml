@@ -174,7 +174,7 @@ backstage:
         catalog:
           locations:
             - type: url
-              target: '{{ .metadata.annotations.addons_repo_url }}/blob/{{ .metadata.annotations.addons_repo_revision }}/templates/backstage/catalog-info.yaml'
+              target: '{{ .metadata.annotations.addons_repo_url }}/blob/{{ .metadata.annotations.addons_repo_revision }}/archive/prometeo-platform-poc/templates-backstage/catalog-info.yaml'
       extraEnvVars:
       - name: BACKSTAGE_FRONTEND_URL
         value: 'https://{{ if eq .metadata.labels.path_routing "false" }}backstage.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}{{ end }}'
@@ -306,7 +306,7 @@ crossplane-compositions:
 # in-place change of `path`. The three new rungs are new either way, so they are named for
 # their rung.
 prometeo-platform:
-  enabled: true
+  enabled: false
   namespace: crossplane-system
   type: manifest
   # This ApplicationSet owns the XRDs. Deleting an XRD deletes its CRD, which deletes
@@ -323,7 +323,7 @@ prometeo-platform:
         values: ['dev']
 
 prometeo-platform-tst:
-  enabled: true
+  enabled: false
   namespace: crossplane-system
   type: manifest
   # This ApplicationSet owns the XRDs. Deleting an XRD deletes its CRD, which deletes
@@ -340,7 +340,7 @@ prometeo-platform-tst:
         values: ['tst']
 
 prometeo-platform-uat:
-  enabled: true
+  enabled: false
   namespace: crossplane-system
   type: manifest
   # This ApplicationSet owns the XRDs. Deleting an XRD deletes its CRD, which deletes
@@ -357,7 +357,7 @@ prometeo-platform-uat:
         values: ['uat']
 
 prometeo-platform-prd:
-  enabled: true
+  enabled: false
   namespace: crossplane-system
   type: manifest
   # This ApplicationSet owns the XRDs. Deleting an XRD deletes its CRD, which deletes
