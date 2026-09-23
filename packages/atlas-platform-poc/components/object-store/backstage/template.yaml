@@ -77,7 +77,7 @@ spec:
     name: Fetch current product manifests
     action: fetch:plain
     input:
-      url: https://github.com/IAGAI/atlas-idp-products-apps/tree/main/products/${{ parameters.product | parseEntityRef
+      url: https://github.com/crossplane-poc/prometeo-products/tree/main/products/${{ parameters.product | parseEntityRef
         | pick('name') }}
       targetPath: products/${{ parameters.product | parseEntityRef | pick('name') }}
   - id: write-component
@@ -113,7 +113,7 @@ spec:
     name: Open a pull request
     action: publish:github:pull-request
     input:
-      repoUrl: github.com?repo=atlas-idp-products-apps&owner=IAGAI
+      repoUrl: github.com?repo=prometeo-products&owner=crossplane-poc
       branchName: scaffolder/s3-${{ parameters.product | parseEntityRef | pick('name') }}-${{ parameters.name }}
       title: 'atlas bucket: ${{ parameters.product | parseEntityRef | pick(''name'') }}/${{ parameters.name }}'
       description: |-

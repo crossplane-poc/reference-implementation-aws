@@ -52,7 +52,7 @@ spec:
     name: Fetch current product manifests
     action: fetch:plain
     input:
-      url: https://github.com/IAGAI/atlas-idp-products-apps/tree/main/products
+      url: https://github.com/crossplane-poc/prometeo-products/tree/main/products
       targetPath: products
   - id: write-component
     name: Create component and update dependencies
@@ -91,7 +91,7 @@ spec:
     name: Open a pull request
     action: publish:github:pull-request
     input:
-      repoUrl: github.com?repo=atlas-idp-products-apps&owner=IAGAI
+      repoUrl: github.com?repo=prometeo-products&owner=crossplane-poc
       branchName: scaffolder/product-${{ parameters.uid }}
       title: 'atlas product: ${{ parameters.displayName }} (${{ parameters.uid }})'
       description: |-
