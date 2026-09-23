@@ -1,0 +1,7 @@
+apiVersion: apiextensions.crossplane.io/v1beta1
+kind: EnvironmentConfig
+metadata:
+  name: atlas-environment
+data:
+  environment: sb3
+  accountId: "515048895486"

@@ -1,0 +1,104 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: product
+  title: Create a product
+  description: The first step for anything new. Creates the product's namespace, its Product component and its entry
+    in the catalog. Add databases and buckets to it afterwards.
+  tags:
+  - atlas
+  - product
+spec:
+  owner: group:default/atlas-platform
+  type: system
+  parameters:
+  - title: About the product
+    required:
+    - displayName
+    - owner
+    properties:
+      displayName:
+        title: Product name
+        type: string
+        description: What you call it. Change it whenever you like — nothing in AWS is named after it.
+        maxLength: 128
+        ui:autofocus: true
+      description:
+        title: What it does
+        type: string
+        description: One line, shown on the product's page in the catalog.
+        maxLength: 512
+      owner:
+        title: Team
+        type: string
+        description: The team that owns this product. Recorded in the product registry.
+        ui:field: OwnerPicker
+        ui:options:
+          catalogFilter:
+            kind: Group
+  - title: The product's ID
+    required:
+    - uid
+    properties:
+      uid:
+        title: Product ID
+        type: string
+        description: An adjective and an animal, assigned at random. Every AWS resource is named after it, so renaming
+          the product later moves nothing. Fixed once the product exists.
+        pattern: ^[a-z]{3,9}-[a-z]{3,10}$
+        ui:field: AnimalUid
+  steps:
+  - id: fetch-product
+    name: Fetch current product manifests
+    action: fetch:plain
+    input:
+      url: https://github.com/IAGAI/atlas-idp-products-apps/tree/main/products
+      targetPath: products
+  - id: write-component
+    name: Create component and update dependencies
+    action: atlas:component:create
+    input:
+      kind: Product
+      product: ${{ parameters.uid }}
+      name: ${{ parameters.uid }}
+      displayName: ${{ parameters.displayName }}
+      description: ${{ parameters.description }}
+      owner: ${{ parameters.owner }}
+  - id: write-catalog-info
+    name: Write the catalog entry
+    action: roadiehq:utils:fs:write
+    input:
+      path: products/${{ parameters.uid }}/catalog-info.yaml
+      content: |-
+        apiVersion: backstage.io/v1alpha1
+        kind: System
+        metadata:
+          # Named after the ID, not the display name — entity names are part of every ref/URL.
+          name: ${{ parameters.uid }}
+          title: ${{ parameters.displayName | dump }}
+        {%- if parameters.description %}
+          description: ${{ parameters.description | dump }}
+        {%- endif %}
+          annotations:
+            atlas.iag.ai/uid: ${{ parameters.uid }}
+            backstage.io/kubernetes-namespace: ${{ parameters.uid }}
+            backstage.io/kubernetes-label-selector: 'atlas.iag.ai/uid=${{ parameters.uid }}'
+            argocd/app-selector: atlas.iag.ai/product=${{ parameters.uid }}
+        spec:
+          owner: ${{ parameters.owner }}
+          lifecycle: experimental
+  - id: publish
+    name: Open a pull request
+    action: publish:github:pull-request
+    input:
+      repoUrl: github.com?repo=atlas-idp-products-apps&owner=IAGAI
+      branchName: scaffolder/product-${{ parameters.uid }}
+      title: 'atlas product: ${{ parameters.displayName }} (${{ parameters.uid }})'
+      description: |-
+        Adds `products/${{ parameters.uid }}/` — the namespace, the Product component and the catalog entry.
+
+        The product's ID is **${{ parameters.uid }}**. Every AWS resource it owns will be named `atlas-${{ parameters.uid }}-<component>-<environment>`, so the product can be renamed later without anything being recreated.
+  output:
+    links:
+    - title: Open the pull request
+      url: ${{ steps['publish'].output.remoteUrl }}

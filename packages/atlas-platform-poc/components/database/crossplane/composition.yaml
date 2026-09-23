@@ -1,0 +1,128 @@
+# One Workspace (cluster + key + subnet/security groups + connect policies + roles Lambda),
+# then a ConfigMap publishing DATABASE_HOST/_PORT/_NAME/_USER. First create takes 5-12 minutes;
+# a service mounting the ConfigMap sits in CreateContainerConfigError until then.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: database.platform.atlas.iag.ai
+  labels:
+    crossplane.io/xrd: databases.platform.atlas.iag.ai
+spec:
+  compositeTypeRef:
+    apiVersion: platform.atlas.iag.ai/v1alpha1
+    kind: Database
+  mode: Pipeline
+  pipeline:
+    - step: environment
+      functionRef:
+        name: function-environment-configs
+      input:
+        apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+        kind: Input
+        spec:
+          environmentConfigs:
+            - type: Reference
+              ref:
+                name: atlas-environment
+
+    - step: workspace
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            {{- $component := $xr.metadata.name -}}
+            {{- $animal := $xr.metadata.namespace -}}
+            {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
+
+            {{- $workspace := printf "atlas-%s-%s-%s" $animal $component $env.environment -}}
+
+            {{- $vars := dict
+                  "animal" $animal
+                  "component" $component
+                  "environment" $env.environment
+                  "size" (default "small" $spec.size)
+                  "access" (default (list) $spec.access)
+                  "admin_access" (default (list) $spec.adminAccess) }}
+            ---
+            apiVersion: tf.m.upbound.io/v1beta1
+            kind: Workspace
+            metadata:
+              name: {{ $component }}
+              namespace: {{ $animal }}
+              annotations:
+                {{ setResourceNameAnnotation "workspace" }}
+                crossplane.io/external-name: {{ $workspace | quote }}
+            spec:
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: terraform
+              writeConnectionSecretToRef:
+                name: {{ $component }}-outputs
+              forProvider:
+                source: Remote
+                module: "git::https://github.com/crossplane-poc/reference-implementation-aws.git//packages/atlas-platform-poc/components/database/terraform?ref=main&depth=1"
+                enableTerraformCLILogging: true
+                varmap: {{ $vars | toJson }}
+
+    - step: connection
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            {{- $component := $xr.metadata.name -}}
+            {{- $animal := $xr.metadata.namespace -}}
+            {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
+
+            {{- $workspace := printf "atlas-%s-%s-%s" $animal $component $env.environment -}}
+            {{- $observed := default dict .observed.resources -}}
+            {{- $out := dig "status" "atProvider" "outputs" dict (dig "workspace" "resource" dict $observed) -}}
+
+            {{- $previous := dig "connection" "resource" "data" dict $observed -}}
+            {{- $host := default (dig "DATABASE_HOST" "" $previous) (dig "database_host" "" $out) -}}
+            {{- $reader := default (dig "DATABASE_READER_HOST" "" $previous) (dig "database_reader_host" "" $out) -}}
+            {{- $port := dig "database_port" "5432" $out -}}
+            {{- $dbName := default (dig "DATABASE_NAME" "" $previous) (dig "database_name" "" $out) -}}
+            {{- $clusterId := dig "cluster_identifier" "" $out }}
+            ---
+            {{ if and $host $dbName }}
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: {{ $component }}-connection
+              namespace: {{ $animal }}
+              annotations:
+                {{ setResourceNameAnnotation "connection" }}
+                gotemplating.fn.crossplane.io/ready: "True"
+            data:
+              DATABASE_HOST: {{ $host | quote }}
+              DATABASE_READER_HOST: {{ $reader | quote }}
+              DATABASE_PORT: {{ $port | quote }}
+              DATABASE_NAME: {{ $dbName | quote }}
+              {{- /* no DATABASE_PASSWORD: the application requests an IAM token as this user */}}
+              DATABASE_USER: iam_user
+            ---
+            {{ end }}
+            apiVersion: platform.atlas.iag.ai/v1alpha1
+            kind: Database
+            status:
+              workspace: {{ $workspace | quote }}
+              host: {{ $host | quote }}
+              readerHost: {{ $reader | quote }}
+              databaseName: {{ $dbName | quote }}
+              clusterIdentifier: {{ $clusterId | quote }}
+
+    - step: ready
+      functionRef:
+        name: function-auto-ready

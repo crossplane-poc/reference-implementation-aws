@@ -1,0 +1,126 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: object-store
+  title: Add a bucket
+  description: An S3 bucket for a product. Private, versioned and encrypted with its own key. Create the product
+    first.
+  tags:
+  - atlas
+  - storage
+spec:
+  owner: group:default/atlas-platform
+  type: resource
+  parameters:
+  - title: Which product
+    required:
+    - product
+    - name
+    properties:
+      product:
+        title: Product
+        type: string
+        description: The product this bucket belongs to.
+        ui:field: EntityPicker
+        ui:options:
+          catalogFilter:
+            kind: System
+          defaultKind: System
+        ui:autofocus: true
+      name:
+        title: What it is for
+        type: string
+        description: '"data", "statics", "uploads". This becomes part of the bucket name — you do not choose the
+          bucket name itself, the platform derives it so it stays stable if the product is renamed.'
+        pattern: ^[a-z]([a-z0-9-]{0,18}[a-z0-9])?$
+        maxLength: 20
+  - title: Retention and access
+    properties:
+      retentionDays:
+        title: Delete objects after (days)
+        type: integer
+        minimum: 1
+        description: Leave blank to keep everything forever. This also expires old versions of overwritten objects,
+          which is what stops a versioned bucket growing without bound.
+      access:
+        title: Services that use it
+        type: array
+        items:
+          type: object
+          required:
+          - service
+          - level
+          properties:
+            service:
+              title: Service
+              type: string
+              ui:field: EntityPicker
+              ui:options:
+                catalogFilter:
+                  kind: Component
+                  spec.type: service
+                defaultKind: Component
+            level:
+              title: Access
+              type: string
+              enum:
+              - ro
+              - rw
+              enumNames:
+              - Read only
+              - Read and write
+              default: rw
+        default: []
+        description: Existing services granted access. Their bucket references are updated in the same PR.
+  steps:
+  - id: fetch-product
+    name: Fetch current product manifests
+    action: fetch:plain
+    input:
+      url: https://github.com/IAGAI/atlas-idp-products-apps/tree/main/products/${{ parameters.product | parseEntityRef
+        | pick('name') }}
+      targetPath: products/${{ parameters.product | parseEntityRef | pick('name') }}
+  - id: write-component
+    name: Create component and update dependencies
+    action: atlas:component:create
+    input:
+      kind: ObjectStore
+      product: ${{ parameters.product }}
+      name: ${{ parameters.name }}
+      retentionDays: ${{ parameters.retentionDays }}
+      access: ${{ parameters.access }}
+  - id: write-catalog-info
+    name: Write the catalog entry
+    action: roadiehq:utils:fs:write
+    input:
+      path: products/${{ parameters.product | parseEntityRef | pick('name') }}/catalog/${{ parameters.name }}.yaml
+      content: |-
+        apiVersion: backstage.io/v1alpha1
+        kind: Resource
+        metadata:
+          name: ${{ (parameters.product | parseEntityRef | pick('name')) + '-' + parameters.name }}
+          title: ${{ parameters.name | dump }}
+          description: ${{ ('S3 bucket for ' + (parameters.product | parseEntityRef | pick('name'))) | dump }}
+          annotations:
+            backstage.io/kubernetes-namespace: ${{ parameters.product | parseEntityRef | pick('name') }}
+            argocd/app-selector: atlas.iag.ai/product=${{ parameters.product | parseEntityRef | pick('name') }}
+        spec:
+          type: object-store
+          lifecycle: experimental
+          owner: ${{ steps['write-component'].output.owner }}
+          system: ${{ parameters.product | parseEntityRef | pick('name') }}
+  - id: publish
+    name: Open a pull request
+    action: publish:github:pull-request
+    input:
+      repoUrl: github.com?repo=atlas-idp-products-apps&owner=IAGAI
+      branchName: scaffolder/s3-${{ parameters.product | parseEntityRef | pick('name') }}-${{ parameters.name }}
+      title: 'atlas bucket: ${{ parameters.product | parseEntityRef | pick(''name'') }}/${{ parameters.name }}'
+      description: |-
+        Adds an `ObjectStore` to `${{ parameters.product | parseEntityRef | pick('name') }}`.
+
+        Syncing it creates the bucket `atlas-${{ parameters.product | parseEntityRef | pick('name') }}-${{ parameters.name }}-<environment>` with its own KMS key.
+  output:
+    links:
+    - title: Open the pull request
+      url: ${{ steps['publish'].output.remoteUrl }}

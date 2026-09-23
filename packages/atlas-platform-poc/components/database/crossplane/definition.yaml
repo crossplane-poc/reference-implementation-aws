@@ -1,0 +1,67 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: databases.platform.atlas.iag.ai
+spec:
+  scope: Namespaced
+  group: platform.atlas.iag.ai
+  names:
+    kind: Database
+    plural: databases
+    shortNames:
+    - db
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              size:
+                type: string
+                description: Capacity tier. Production always has a failover replica in another AZ.
+                enum:
+                - small
+                - medium
+                - large
+                default: small
+              access:
+                type: array
+                description: Workload names granted application-user database access.
+                items:
+                  type: string
+                  pattern: ^[a-z]([a-z0-9-]{0,18}[a-z0-9])?$
+                  maxLength: 20
+                default: []
+                x-kubernetes-list-type: set
+              adminAccess:
+                type: array
+                description: "IAM role names granted the admin database user. Full role names, not service\
+                  \ names \u2014 nothing is prefixed for you."
+                items:
+                  type: string
+                default: []
+                x-kubernetes-list-type: set
+          status:
+            type: object
+            properties:
+              workspace:
+                type: string
+              host:
+                type: string
+              readerHost:
+                type: string
+              databaseName:
+                type: string
+              clusterIdentifier:
+                type: string
+        required:
+        - spec
+        x-kubernetes-validations:
+        - rule: self.metadata.name.matches('^[a-z]([a-z0-9-]{0,18}[a-z0-9])?$')
+          message: Invalid component name
+  defaultCompositionUpdatePolicy: Manual

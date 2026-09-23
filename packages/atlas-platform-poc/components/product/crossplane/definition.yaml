@@ -1,0 +1,58 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: products.platform.atlas.iag.ai
+spec:
+  scope: Namespaced
+  group: platform.atlas.iag.ai
+  names:
+    kind: Product
+    plural: products
+    shortNames:
+    - prod
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            required:
+            - displayName
+            - owner
+            properties:
+              displayName:
+                type: string
+                description: "What the product is called \u2014 \"Aircraft Damage Detection\". Change\
+                  \ it as often as you like; nothing in AWS is named after it."
+                minLength: 1
+                maxLength: 128
+              description:
+                type: string
+                description: One line, shown on the product's page in the catalog.
+                maxLength: 512
+              owner:
+                type: string
+                description: The team that owns this product. Recorded in the product registry, which
+                  is what cost reporting and access tooling join against.
+                minLength: 1
+          status:
+            type: object
+            properties:
+              workspace:
+                type: string
+              uid:
+                type: string
+              namespace:
+                type: string
+              registryParameter:
+                type: string
+        required:
+        - spec
+        x-kubernetes-validations:
+        - rule: self.metadata.name.matches('^([a-z]{3,9}-)?[a-z]{3,10}$')
+          message: Invalid component name
+  defaultCompositionUpdatePolicy: Manual

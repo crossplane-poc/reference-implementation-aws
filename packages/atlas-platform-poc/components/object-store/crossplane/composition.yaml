@@ -1,0 +1,125 @@
+# One Workspace (the bucket + its IAM policies), then a ConfigMap publishing
+# S3_BUCKET / S3_BUCKET_ARN into the product's namespace, where its workloads read it.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: objectstore.platform.atlas.iag.ai
+  labels:
+    crossplane.io/xrd: objectstores.platform.atlas.iag.ai
+spec:
+  compositeTypeRef:
+    apiVersion: platform.atlas.iag.ai/v1alpha1
+    kind: ObjectStore
+  mode: Pipeline
+  pipeline:
+    - step: environment
+      functionRef:
+        name: function-environment-configs
+      input:
+        apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+        kind: Input
+        spec:
+          environmentConfigs:
+            - type: Reference
+              ref:
+                name: atlas-environment
+
+    - step: workspace
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            {{- $component := $xr.metadata.name -}}
+            {{- $animal := $xr.metadata.namespace -}}
+            {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
+
+            {{- $workspace := printf "atlas-%s-%s-%s" $animal $component $env.environment -}}
+
+            {{- $access := list -}}
+            {{- range $g := $spec.access -}}
+            {{- $access = append $access (dict "service" $g.service "level" (default "rw" $g.level)) -}}
+            {{- end -}}
+
+            {{- $vars := dict
+                  "animal" $animal
+                  "component" $component
+                  "environment" $env.environment
+                  "retention_days" (default 0 $spec.retentionDays)
+                  "access" $access }}
+            ---
+            apiVersion: tf.m.upbound.io/v1beta1
+            kind: Workspace
+            metadata:
+              name: {{ $component }}
+              namespace: {{ $animal }}
+              annotations:
+                {{ setResourceNameAnnotation "workspace" }}
+                crossplane.io/external-name: {{ $workspace | quote }}
+            spec:
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: terraform
+              writeConnectionSecretToRef:
+                name: {{ $component }}-outputs
+              forProvider:
+                source: Remote
+                module: "git::https://github.com/crossplane-poc/reference-implementation-aws.git//packages/atlas-platform-poc/components/object-store/terraform?ref=main&depth=1"
+                enableTerraformCLILogging: true
+                varmap: {{ $vars | toJson }}
+
+    - step: connection
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            {{- $component := $xr.metadata.name -}}
+            {{- $animal := $xr.metadata.namespace -}}
+            {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
+
+            {{- $workspace := printf "atlas-%s-%s-%s" $animal $component $env.environment -}}
+            {{- $observed := default dict .observed.resources -}}
+            {{- $out := dig "status" "atProvider" "outputs" dict (dig "workspace" "resource" dict $observed) -}}
+
+            {{- $previous := dig "connection" "resource" "data" dict $observed -}}
+            {{- $bucket := default (dig "S3_BUCKET" "" $previous) (dig "bucket_name" "" $out) -}}
+            {{- $arn := default (dig "S3_BUCKET_ARN" "" $previous) (dig "bucket_arn" "" $out) -}}
+            {{- $prefix := upper (replace "-" "_" $component) }}
+            ---
+            {{ if and $bucket $arn }}
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: {{ $component }}-connection
+              namespace: {{ $animal }}
+              annotations:
+                {{ setResourceNameAnnotation "connection" }}
+                gotemplating.fn.crossplane.io/ready: "True"
+            data:
+              S3_BUCKET: {{ $bucket | quote }}
+              S3_BUCKET_ARN: {{ $arn | quote }}
+              {{ $prefix }}_S3_BUCKET: {{ $bucket | quote }}
+              {{ $prefix }}_S3_BUCKET_ARN: {{ $arn | quote }}
+            ---
+            {{ end }}
+            apiVersion: platform.atlas.iag.ai/v1alpha1
+            kind: ObjectStore
+            status:
+              workspace: {{ $workspace | quote }}
+              bucketName: {{ $bucket | quote }}
+              bucketArn: {{ $arn | quote }}
+
+    - step: ready
+      functionRef:
+        name: function-auto-ready

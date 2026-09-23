@@ -1,0 +1,66 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: objectstores.platform.atlas.iag.ai
+spec:
+  scope: Namespaced
+  group: platform.atlas.iag.ai
+  names:
+    kind: ObjectStore
+    plural: objectstores
+    shortNames:
+    - objstore
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              retentionDays:
+                type: integer
+                description: Delete objects, and non-current versions of them, after this many days. Leave
+                  it unset to keep everything forever.
+                minimum: 1
+              access:
+                type: array
+                description: Services allowed to use the bucket. A service's IAM role is named atlas-<animal>-<service>-<environment>,
+                  so this is a service name, not a reference to anything.
+                items:
+                  type: object
+                  required:
+                  - service
+                  properties:
+                    service:
+                      type: string
+                      pattern: ^[a-z]([a-z0-9-]{0,18}[a-z0-9])?$
+                      maxLength: 20
+                    level:
+                      type: string
+                      enum:
+                      - ro
+                      - rw
+                      default: rw
+                default: []
+                x-kubernetes-list-type: map
+                x-kubernetes-list-map-keys:
+                - service
+          status:
+            type: object
+            properties:
+              workspace:
+                type: string
+              bucketName:
+                type: string
+              bucketArn:
+                type: string
+        required:
+        - spec
+        x-kubernetes-validations:
+        - rule: self.metadata.name.matches('^[a-z]([a-z0-9-]{0,18}[a-z0-9])?$')
+          message: Invalid component name
+  defaultCompositionUpdatePolicy: Manual

@@ -1,0 +1,125 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: database
+  title: Add a database
+  description: A PostgreSQL database for a product. Encrypted, backed up, reachable only from inside the cluster,
+    and with no password to look after. Create the product first.
+  tags:
+  - atlas
+  - database
+spec:
+  owner: group:default/atlas-platform
+  type: resource
+  parameters:
+  - title: Which product
+    required:
+    - product
+    - name
+    properties:
+      product:
+        title: Product
+        type: string
+        description: The product this database belongs to.
+        ui:field: EntityPicker
+        ui:options:
+          catalogFilter:
+            kind: System
+          defaultKind: System
+        ui:autofocus: true
+      name:
+        title: Name
+        type: string
+        description: What to call it. Most products have one database and leave this as "db"; a second one needs
+          a name of its own.
+        pattern: ^[a-z]([a-z0-9-]{0,18}[a-z0-9])?$
+        default: db
+        maxLength: 20
+  - title: How big, and who uses it
+    properties:
+      size:
+        title: Size
+        type: string
+        enum:
+        - small
+        - medium
+        - large
+        enumNames:
+        - Small
+        - Medium
+        - Large
+        default: small
+        description: Capacity tier. Production always includes a failover replica.
+      access:
+        title: Services that use it
+        type: array
+        items:
+          type: string
+          ui:field: EntityPicker
+          ui:options:
+            catalogFilter:
+              kind: Component
+              spec.type: service
+            defaultKind: Component
+        default: []
+        description: Existing services granted application-user access. Their database references are updated in
+          the same PR.
+  steps:
+  - id: fetch-product
+    name: Fetch current product manifests
+    action: fetch:plain
+    input:
+      url: https://github.com/IAGAI/atlas-idp-products-apps/tree/main/products/${{ parameters.product | parseEntityRef
+        | pick('name') }}
+      targetPath: products/${{ parameters.product | parseEntityRef | pick('name') }}
+  - id: normalize-access
+    name: Resolve selected services
+    action: roadiehq:utils:jsonata
+    input:
+      data: ${{ parameters.access }}
+      expression: '[$.{ "service": $, "level": "rw" }]'
+  - id: write-component
+    name: Create component and update dependencies
+    action: atlas:component:create
+    input:
+      kind: Database
+      product: ${{ parameters.product }}
+      name: ${{ parameters.name }}
+      size: ${{ parameters.size }}
+      access: ${{ steps['normalize-access'].output.result }}
+  - id: write-catalog-info
+    name: Write the catalog entry
+    action: roadiehq:utils:fs:write
+    input:
+      path: products/${{ parameters.product | parseEntityRef | pick('name') }}/catalog/${{ parameters.name }}.yaml
+      content: |-
+        apiVersion: backstage.io/v1alpha1
+        kind: Resource
+        metadata:
+          name: ${{ (parameters.product | parseEntityRef | pick('name')) + '-' + parameters.name }}
+          title: ${{ parameters.name | dump }}
+          description: ${{ ('PostgreSQL database for ' + (parameters.product | parseEntityRef | pick('name'))) | dump }}
+          annotations:
+            # A database has no pods. The product namespace is where its Database XR and the
+            # Workspace that builds it live, so that is what the Kubernetes tab shows.
+            backstage.io/kubernetes-namespace: ${{ parameters.product | parseEntityRef | pick('name') }}
+            argocd/app-selector: atlas.iag.ai/product=${{ parameters.product | parseEntityRef | pick('name') }}
+        spec:
+          type: database
+          lifecycle: experimental
+          owner: ${{ steps['write-component'].output.owner }}
+          system: ${{ parameters.product | parseEntityRef | pick('name') }}
+  - id: publish
+    name: Open a pull request
+    action: publish:github:pull-request
+    input:
+      repoUrl: github.com?repo=atlas-idp-products-apps&owner=IAGAI
+      branchName: scaffolder/database-${{ parameters.product | parseEntityRef | pick('name') }}-${{ parameters.name
+        }}
+      title: 'atlas database: ${{ parameters.product | parseEntityRef | pick(''name'') }}/${{ parameters.name }}'
+      description: Adds a Database to ${{ parameters.product | parseEntityRef | pick('name') }} and updates the
+        selected workloads.
+  output:
+    links:
+    - title: Open the pull request
+      url: ${{ steps['publish'].output.remoteUrl }}

@@ -1,0 +1,132 @@
+# One Workspace (the registry parameter), then a product-connection ConfigMap. The namespace
+# itself ships as a plain manifest alongside this XR in atlas-idp-products-apps — a namespaced
+# XR needs its namespace to exist first.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: product.platform.atlas.iag.ai
+  labels:
+    crossplane.io/xrd: products.platform.atlas.iag.ai
+spec:
+  compositeTypeRef:
+    apiVersion: platform.atlas.iag.ai/v1alpha1
+    kind: Product
+  mode: Pipeline
+  pipeline:
+    - step: environment
+      functionRef:
+        name: function-environment-configs
+      input:
+        apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+        kind: Input
+        spec:
+          environmentConfigs:
+            - type: Reference
+              ref:
+                name: atlas-environment
+
+    - step: workspace
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            {{- $animal := $xr.metadata.name -}}
+            {{- $ns := $xr.metadata.namespace -}}
+            {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
+
+            {{- $workspace := printf "atlas-%s-product-%s" $animal $env.environment -}}
+
+            {{- $vars := dict
+                  "animal" $animal
+                  "environment" $env.environment
+                  "display_name" $spec.displayName
+                  "description" (default "" $spec.description)
+                  "owner" (default "" $spec.owner) }}
+            ---
+            apiVersion: tf.m.upbound.io/v1beta1
+            kind: Workspace
+            metadata:
+              name: {{ $animal }}
+              namespace: {{ $ns }}
+              annotations:
+                {{ setResourceNameAnnotation "workspace" }}
+                crossplane.io/external-name: {{ $workspace | quote }}
+            spec:
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: terraform
+              writeConnectionSecretToRef:
+                name: {{ $animal }}-outputs
+              forProvider:
+                source: Remote
+                module: "git::https://github.com/crossplane-poc/reference-implementation-aws.git//packages/atlas-platform-poc/components/product/terraform?ref=main&depth=1"
+                enableTerraformCLILogging: true
+                varmap: {{ $vars | toJson }}
+
+    - step: connection
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            {{- $animal := $xr.metadata.name -}}
+            {{- $ns := $xr.metadata.namespace -}}
+            {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
+
+            {{- $workspace := printf "atlas-%s-product-%s" $animal $env.environment -}}
+            {{- $observed := default dict .observed.resources -}}
+            {{- $out := dig "status" "atProvider" "outputs" dict (dig "workspace" "resource" dict $observed) -}}
+
+            {{- $registry := dig "registry_parameter" "" $out }}
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: product-connection
+              namespace: {{ $ns }}
+              annotations:
+                {{ setResourceNameAnnotation "connection" }}
+                gotemplating.fn.crossplane.io/ready: "True"
+            data:
+              PRODUCT_UID: {{ $animal | quote }}
+              PRODUCT_NAME: {{ $spec.displayName | quote }}
+              PRODUCT_ENVIRONMENT: {{ $env.environment | quote }}
+              PRODUCT_REGISTRY_PARAMETER: {{ $registry | quote }}
+            ---
+            {{- /* Nothing is meant to run here — a product's namespace holds the things that
+                   have no pods, and each workload has a namespace of its own. Anything that
+                   does turn up arrived by hand, and talks to nothing. */}}
+            apiVersion: networking.k8s.io/v1
+            kind: NetworkPolicy
+            metadata:
+              name: default-deny
+              namespace: {{ $ns }}
+              annotations:
+                {{ setResourceNameAnnotation "netpol-default-deny" }}
+                gotemplating.fn.crossplane.io/ready: "True"
+            spec:
+              podSelector: {}
+              policyTypes: [Ingress, Egress]
+            ---
+            apiVersion: platform.atlas.iag.ai/v1alpha1
+            kind: Product
+            status:
+              workspace: {{ $workspace | quote }}
+              uid: {{ $animal | quote }}
+              namespace: {{ $ns | quote }}
+              registryParameter: {{ $registry | quote }}
+
+    - step: ready
+      functionRef:
+        name: function-auto-ready
