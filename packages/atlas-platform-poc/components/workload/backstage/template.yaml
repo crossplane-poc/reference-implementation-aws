@@ -1,0 +1,373 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: workload
+  title: Add a service
+  description: Somewhere for a product's code to run — an identity and the network rules that let it reach what
+    it needs. Create the product first.
+  tags:
+  - atlas
+  - service
+spec:
+  owner: group:default/atlas-platform
+  type: service
+  parameters:
+  - title: About the service
+    required:
+    - product
+    - name
+    properties:
+      product:
+        title: Product
+        type: string
+        description: The product this service belongs to.
+        ui:field: EntityPicker
+        ui:options:
+          catalogFilter:
+            kind: System
+          defaultKind: System
+        ui:autofocus: true
+      name:
+        title: What it is
+        type: string
+        description: '"be", "fe", "worker". This becomes part of every name the platform derives, and it is how
+          other services refer to this one.'
+        pattern: ^[a-z]([a-z0-9-]{0,18}[a-z0-9])?$
+        maxLength: 20
+      newRepo:
+        title: Create a new repository
+        type: boolean
+        description: Opens a pull request in iac-github for IAGAI/<product>-<name>, built from the template for
+          the kind of code it holds. Untick to use a repository that already exists.
+        default: true
+      containerPort:
+        title: Port it listens on
+        type: integer
+        description: The port used by the container and its Kubernetes Service.
+        default: 8000
+        minimum: 1
+        maximum: 65535
+      image:
+        title: Image to run
+        type: string
+        description: An existing container image. Leave blank to provision identity and networking only.
+      size:
+        title: Compute size
+        type: string
+        enum:
+        - small
+        - medium
+        - large
+        default: small
+    dependencies:
+      newRepo:
+        oneOf:
+        - required:
+          - repoType
+          properties:
+            newRepo:
+              enum:
+              - true
+            repoType:
+              title: What it is written in
+              type: string
+              enum:
+              - Atlas-Python
+              - Python
+              - NextJS
+              - Other
+              enumNames:
+              - Python backend
+              - Python application
+              - Next.js frontend
+              - Anything else
+              default: Atlas-Python
+        - required:
+          - repo
+          properties:
+            newRepo:
+              enum:
+              - false
+            repo:
+              title: Source repository
+              type: string
+              description: owner/name on GitHub. Recorded on the catalog entry so the service links back to its code
+                — releases happen by opening a pull request against this repo.
+              pattern: ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$
+  - title: What it uses
+    properties:
+      database:
+        title: Database
+        type: object
+        properties:
+          needed:
+            title: It uses a database
+            type: boolean
+            default: false
+        dependencies:
+          needed:
+            oneOf:
+            - properties:
+                needed:
+                  enum:
+                  - false
+            - required:
+              - component
+              properties:
+                needed:
+                  enum:
+                  - true
+                component:
+                  title: Which one
+                  type: string
+                  ui:field: EntityPicker
+                  ui:options:
+                    catalogFilter:
+                      kind: Resource
+                      spec.type: database
+                    defaultKind: Resource
+      buckets:
+        title: Buckets
+        type: object
+        properties:
+          needed:
+            title: It uses one or more buckets
+            type: boolean
+            default: false
+        dependencies:
+          needed:
+            oneOf:
+            - properties:
+                needed:
+                  enum:
+                  - false
+            - required:
+              - components
+              properties:
+                needed:
+                  enum:
+                  - true
+                components:
+                  title: Which ones
+                  type: array
+                  items:
+                    type: object
+                    required:
+                    - bucket
+                    - level
+                    properties:
+                      bucket:
+                        title: Bucket
+                        type: string
+                        ui:field: EntityPicker
+                        ui:options:
+                          catalogFilter:
+                            kind: Resource
+                            spec.type: object-store
+                          defaultKind: Resource
+                      level:
+                        title: Access
+                        type: string
+                        enum:
+                        - ro
+                        - rw
+                        enumNames:
+                        - Read only
+                        - Read and write
+                        default: rw
+                  default: []
+      bedrock:
+        title: It calls Bedrock
+        type: boolean
+        description: Invocation of the approved models through an EU inference profile. No key to handle — the service's
+          own identity is what Bedrock accepts.
+        default: false
+  - title: Who it talks to
+    description: Nothing may reach this service and it may reach nothing until it is listed here. Each entry opens
+      one direction to one peer, and the peer's own manifest is updated in the same pull request so both ends agree.
+    properties:
+      allowFrom:
+        title: Services allowed to call this one
+        type: array
+        description: They arrive on this service's own port, answered above.
+        items:
+          type: object
+          required:
+          - service
+          properties:
+            service:
+              title: Service
+              type: string
+              ui:field: EntityPicker
+              ui:options:
+                catalogFilter:
+                  kind: Component
+                  spec.type: service
+                defaultKind: Component
+        default: []
+      allowTo:
+        title: Services this one may call
+        type: array
+        description: No port to pick here either — each one is looked up in the catalog, which records the port
+          a service listens on.
+        items:
+          type: object
+          required:
+          - service
+          properties:
+            service:
+              title: Service
+              type: string
+              ui:field: EntityPicker
+              ui:options:
+                catalogFilter:
+                  kind: Component
+                  spec.type: service
+                defaultKind: Component
+        default: []
+      egressDomains:
+        title: Public addresses it may reach
+        type: array
+        description: Hostnames, reached over HTTPS. Everything else on the internet stays closed.
+        items:
+          type: string
+        default: []
+  - title: How it is reached
+    properties:
+      ingress:
+        title: It answers requests from outside the cluster
+        type: boolean
+        default: false
+      ingressPath:
+        title: On which path
+        type: string
+        description: The hostname is the product's and is not a choice, so two services share it by taking different
+          paths.
+        default: /
+  steps:
+  - id: fetch-product
+    name: Fetch current product manifests
+    action: fetch:plain
+    input:
+      url: https://github.com/crossplane-poc/prometeo-products/tree/main/products/${{ parameters.product | parseEntityRef
+        | pick('name') }}
+      targetPath: products/${{ parameters.product | parseEntityRef | pick('name') }}
+  - id: normalize-allowFrom
+    name: Resolve selected peers
+    action: roadiehq:utils:jsonata
+    input:
+      data: ${{ parameters.allowFrom }}
+      expression: '[$.service]'
+  - id: normalize-allowTo
+    name: Resolve selected peers
+    action: roadiehq:utils:jsonata
+    input:
+      data: ${{ parameters.allowTo }}
+      expression: '[$.service]'
+  - id: write-component
+    name: Create component and update dependencies
+    action: atlas:component:create
+    input:
+      kind: Workload
+      product: ${{ parameters.product }}
+      name: ${{ parameters.name }}
+      containerPort: ${{ parameters.containerPort }}
+      image: ${{ parameters.image }}
+      bedrock: ${{ parameters.bedrock }}
+      ingress: ${{ parameters.ingress }}
+      ingressPath: ${{ parameters.ingressPath }}
+      egressDomains: ${{ parameters.egressDomains }}
+      database: ${{ parameters.database.component if (parameters.database and parameters.database.needed) else ''
+        }}
+      buckets: ${{ parameters.buckets.components if (parameters.buckets and parameters.buckets.needed) else [] }}
+      allowFrom: ${{ steps['normalize-allowFrom'].output.result }}
+      allowTo: ${{ steps['normalize-allowTo'].output.result }}
+      size: ${{ parameters.size }}
+  - id: write-catalog-info
+    name: Write the catalog entry
+    action: roadiehq:utils:fs:write
+    input:
+      path: products/${{ parameters.product | parseEntityRef | pick('name') }}/catalog/${{ parameters.name }}.yaml
+      content: |-
+        apiVersion: backstage.io/v1alpha1
+        kind: Component
+        metadata:
+          name: ${{ (parameters.product | parseEntityRef | pick('name')) + '-' + parameters.name }}
+          title: ${{ parameters.name | dump }}
+          description: ${{ ('Service ' + parameters.name + ' of ' + (parameters.product | parseEntityRef | pick('name'))) | dump }}
+          annotations:
+            backstage.io/kubernetes-namespace: ${{ (parameters.product | parseEntityRef | pick('name')) + '-' + parameters.name }}
+            backstage.io/kubernetes-label-selector: 'app=${{ parameters.name }}'
+            argocd/app-selector: atlas.iag.ai/product=${{ parameters.product | parseEntityRef | pick('name') }}
+            atlas.iag.ai/repo: ${{ (('IAGAI/' + (parameters.product | parseEntityRef | pick('name')) + '-' + parameters.name) if parameters.newRepo else parameters.repo) | dump }}
+            # Read back by this same template when another service says it may call this one.
+            # Without it that lookup falls back to 8000.
+            atlas.iag.ai/container-port: ${{ parameters.containerPort | string | dump }}
+        spec:
+          type: service
+          lifecycle: experimental
+          owner: ${{ steps['write-component'].output.owner }}
+          system: ${{ parameters.product | parseEntityRef | pick('name') }}
+        {%- if (parameters.database and parameters.database.needed and parameters.database.component) or (parameters.buckets and parameters.buckets.needed and parameters.buckets.components | length) %}
+          dependsOn:
+        {%- if parameters.database and parameters.database.needed and parameters.database.component %}
+            - ${{ ('resource:default/' + (parameters.database.component | parseEntityRef | pick('name'))) | dump }}
+        {%- endif %}
+        {%- for b in parameters.buckets.components | default([]) %}
+            - ${{ ('resource:default/' + (b.bucket | parseEntityRef | pick('name'))) | dump }}
+        {%- endfor %}
+        {%- endif %}
+  - id: write-repo-config
+    name: Describe the new repository
+    if: ${{ parameters.newRepo }}
+    action: roadiehq:utils:fs:write
+    input:
+      path: iac-github/config/repos/${{ parameters.product | parseEntityRef | pick('name') }}-${{ parameters.name }}.yaml
+      content: |-
+        name: ${{ (parameters.product | parseEntityRef | pick('name')) + '-' + parameters.name }}
+        description: ${{ ('Service ' + parameters.name + ' of ' + (parameters.product | parseEntityRef | pick('name'))) | dump }}
+        team_slug: ${{ steps['write-component'].output.owner | parseEntityRef | pick('name') }}
+        type: ${{ parameters.repoType }}
+        additional_teams_with_access:
+          - team_slug: se-platform-lovelace
+            permission: admin
+        atlas_workflows_adp:
+          service_name: ${{ parameters.name }}
+          product: ${{ parameters.product | parseEntityRef | pick('name') }}
+  - id: publish
+    name: Open a pull request
+    action: publish:github:pull-request
+    input:
+      repoUrl: github.com?repo=prometeo-products&owner=crossplane-poc
+      sourcePath: products
+      targetPath: products
+      branchName: scaffolder/workload-${{ parameters.product | parseEntityRef | pick('name') }}-${{ parameters.name
+        }}
+      title: 'atlas service: ${{ parameters.product | parseEntityRef | pick(''name'') }}/${{ parameters.name }}'
+      description: |-
+        Adds the `${{ parameters.name }}` service to `${{ parameters.product | parseEntityRef | pick('name') }}`.
+
+        It also updates every component it was pointed at — each database and bucket grants it access, and each service it talks to gets the matching rule — because access is recorded at both ends. Check the whole diff.
+  - id: publish-repo
+    name: Open the repository pull request
+    if: ${{ parameters.newRepo }}
+    action: publish:github:pull-request
+    input:
+      repoUrl: github.com?repo=iac-github&owner=crossplane-poc
+      sourcePath: iac-github
+      branchName: scaffolder/repo-${{ parameters.product | parseEntityRef | pick('name') }}-${{ parameters.name }}
+      title: 'NOJIRA: Add repository ${{ parameters.product | parseEntityRef | pick(''name'') }}-${{ parameters.name
+        }} for ADP service ${{ parameters.product | parseEntityRef | pick(''name'') }}/${{ parameters.name }}'
+      description: |-
+        Creates the repository for the `${{ parameters.name }}` service of `${{ parameters.product | parseEntityRef | pick('name') }}`, opened by the Atlas Developer Platform.
+  output:
+    links:
+    - title: Open the pull request
+      url: ${{ steps['publish'].output.remoteUrl }}
+    - title: Open the repository pull request
+      if: ${{ parameters.newRepo }}
+      url: ${{ steps['publish-repo'].output.remoteUrl }}
+    text:
+    - title: Service address
+      content: ${{ parameters.name }}.${{ parameters.product | parseEntityRef | pick('name') }}-${{ parameters.name
+        }}.svc.cluster.local:${{ parameters.containerPort }}

@@ -1,0 +1,172 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: workloads.platform.atlas.iag.ai
+spec:
+  scope: Namespaced
+  group: platform.atlas.iag.ai
+  names:
+    kind: Workload
+    plural: workloads
+    shortNames:
+    - wl
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              image:
+                type: string
+                description: An existing container image. Omit to provision only identity and network
+                  access.
+              replicas:
+                type: integer
+                description: How many copies to run.
+                minimum: 1
+                default: 2
+                maximum: 20
+              containerPort:
+                type: integer
+                description: The port used by the container, Service, and ingress backend.
+                minimum: 1
+                maximum: 65535
+                default: 8000
+              healthPath:
+                type: string
+                description: A path that answers 200 when the service is ready. Used by the probes and,
+                  where there is an ingress, by the load balancer's health check.
+                default: /health
+              env:
+                type: object
+                description: "Plain environment variables. Connection details for the product's database\
+                  \ and buckets arrive on their own \u2014 do not repeat them here, and do not put secrets\
+                  \ here."
+                additionalProperties:
+                  type: string
+                default: {}
+              database:
+                type: string
+                description: The name of a Database in this product. Its connection details are handed
+                  to the container and the network is opened to it. The Database must also list this service
+                  under access.
+                pattern: ^[a-z]([a-z0-9-]{0,18}[a-z0-9])?$
+                maxLength: 20
+              buckets:
+                type: array
+                description: Names of ObjectStores in this product whose connection details the container
+                  gets. Each bucket must also list this service under access.
+                items: &id001
+                  type: string
+                  pattern: ^[a-z]([a-z0-9-]{0,18}[a-z0-9])?$
+                  maxLength: 20
+                default: []
+                x-kubernetes-list-type: set
+              bedrock:
+                type: boolean
+                description: Whether this workload calls Bedrock. It may then invoke the approved models
+                  through an EU inference profile, and reach the Bedrock endpoint.
+                default: false
+              ingress:
+                type: object
+                description: Whether this workload answers requests from outside the cluster.
+                properties:
+                  enabled:
+                    type: boolean
+                    default: false
+                  path:
+                    type: string
+                    description: Which part of the product's hostname this workload answers on. The hostname
+                      itself is the product's and is not a choice, so two workloads share it by taking
+                      different paths.
+                    default: /
+                    pattern: ^/
+                default: {}
+              network:
+                type: object
+                description: Nothing may reach this workload and it may reach nothing, until it is listed
+                  here. Both ends of a connection have to allow it, so each entry has a counterpart in
+                  the peer's own manifest.
+                properties:
+                  allowFrom:
+                    type: array
+                    description: Services allowed to call this one.
+                    items:
+                      type: object
+                      required:
+                      - service
+                      properties:
+                        service: *id001
+                        port:
+                          type: integer
+                          description: "Defaults to this workload's containerPort \u2014 a caller arrives\
+                            \ on the port this service listens on."
+                          minimum: 1
+                          maximum: 65535
+                    default: []
+                    x-kubernetes-list-type: map
+                    x-kubernetes-list-map-keys:
+                    - service
+                  allowTo:
+                    type: array
+                    description: Services this one may call.
+                    items:
+                      type: object
+                      required:
+                      - service
+                      - port
+                      properties:
+                        service: *id001
+                        port:
+                          type: integer
+                          description: Rarely needed. Left out, the rule allows any port, and the peer's
+                            own allowFrom is what narrows it to the port the peer listens on.
+                          minimum: 1
+                          maximum: 65535
+                    default: []
+                    x-kubernetes-list-type: map
+                    x-kubernetes-list-map-keys:
+                    - service
+                  egressDomains:
+                    type: array
+                    description: Public hostnames this workload may reach, over HTTPS.
+                    items:
+                      type: string
+                    default: []
+                    x-kubernetes-list-type: set
+                default: {}
+              size:
+                type: string
+                enum:
+                - small
+                - medium
+                - large
+                default: small
+              secretRefs:
+                type: array
+                default: []
+                x-kubernetes-list-type: set
+                items:
+                  type: string
+                  pattern: ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$
+                  maxLength: 253
+          status:
+            type: object
+            properties:
+              workspace:
+                type: string
+              roleArn:
+                type: string
+              host:
+                type: string
+        required:
+        - spec
+        x-kubernetes-validations:
+        - rule: self.metadata.name.matches('^[a-z]([a-z0-9-]{0,18}[a-z0-9])?$')
+          message: Invalid component name
+  defaultCompositionUpdatePolicy: Manual

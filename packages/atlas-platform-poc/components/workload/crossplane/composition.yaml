@@ -1,0 +1,422 @@
+# One Workspace for the AWS side (the role the datastores grant to, the network rules that name
+# an AWS address, and the connection ConfigMaps pulled in from the product), then the Kubernetes
+# side rendered natively.
+#
+# A workload has a namespace to itself, named <product>-<workload>. The product's own namespace
+# holds what has no pods — the Product, the Databases, the ObjectStores and the ConfigMaps they
+# publish — and a namespaced XR composes only into its own namespace, which is why those
+# ConfigMaps reach the pods through the module rather than through this file.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: workload.platform.atlas.iag.ai
+  labels:
+    crossplane.io/xrd: workloads.platform.atlas.iag.ai
+spec:
+  compositeTypeRef:
+    apiVersion: platform.atlas.iag.ai/v1alpha1
+    kind: Workload
+  mode: Pipeline
+  pipeline:
+    - step: environment
+      functionRef:
+        name: function-environment-configs
+      input:
+        apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+        kind: Input
+        spec:
+          environmentConfigs:
+            - type: Reference
+              ref:
+                name: atlas-environment
+
+    - step: workspace
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            {{- $component := $xr.metadata.name -}}
+            {{- $ns := $xr.metadata.namespace -}}
+            {{- $animal := trimSuffix (printf "-%s" $component) $ns -}}
+            {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
+
+            {{- $workspace := printf "adp-%s-%s-%s" $animal $component $env.environment -}}
+            {{- $ingress := default dict $spec.ingress -}}
+
+            {{- $vars := dict
+                  "animal" $animal
+                  "component" $component
+                  "environment" $env.environment
+                  "container_port" (int (default 8000 $spec.containerPort))
+                  "database" (default "" $spec.database)
+                  "buckets" (default (list) $spec.buckets)
+                  "bedrock" (not (not $spec.bedrock))
+                  "bedrock_inference_profiles" (default (list) $env.bedrockInferenceProfiles)
+                  "ingress_enabled" (and (not (not $ingress.enabled)) (not (not $spec.image))) }}
+            ---
+            apiVersion: tf.m.upbound.io/v1beta1
+            kind: Workspace
+            metadata:
+              name: {{ $component }}
+              namespace: {{ $ns }}
+              annotations:
+                {{ setResourceNameAnnotation "workspace" }}
+                crossplane.io/external-name: {{ $workspace | quote }}
+            spec:
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: terraform
+              writeConnectionSecretToRef:
+                name: {{ $component }}-outputs
+              forProvider:
+                source: Remote
+                module: "git::https://github.com/crossplane-poc/reference-implementation-aws.git//packages/atlas-platform-poc/components/workload/terraform?ref=main&depth=1"
+                enableTerraformCLILogging: true
+                varmap: {{ $vars | toJson }}
+
+    - step: workload
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            {{- $component := $xr.metadata.name -}}
+            {{- $ns := $xr.metadata.namespace -}}
+            {{- $animal := trimSuffix (printf "-%s" $component) $ns -}}
+            {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
+
+            {{- $port := int (default 8000 $spec.containerPort) -}}
+            {{- $net := default dict $spec.network -}}
+            {{- $allowFrom := default (list) $net.allowFrom -}}
+            {{- $allowTo := default (list) $net.allowTo -}}
+            {{- $egressDomains := default (list) $net.egressDomains -}}
+            {{- $ingress := default dict $spec.ingress -}}
+            {{- $buckets := default (list) $spec.buckets -}}
+            {{- $dnsDomain := "atlas.iag.ai" -}}
+            {{- if ne $env.environment "prd" -}}
+            {{- $dnsDomain = printf "%s.atlas.iag.ai" $env.environment -}}
+            {{- end -}}
+
+            {{- $labels := dict "app" $component "atlas.iag.ai/product" $animal -}}
+            {{- $observed := default dict .observed.resources -}}
+            {{- $deployment := dig "deployment" "resource" dict $observed -}}
+            {{- $revision := dig "workspace" "resource" "status" "atProvider" "outputs" "configuration_revision" "" $observed -}}
+            {{- $previousRevision := dig "spec" "template" "metadata" "annotations" "atlas.iag.ai/connections" "" $deployment -}}
+            {{- $revision = default $previousRevision $revision -}}
+            {{- $replicas := int (default 2 $spec.replicas) -}}
+            {{- if eq $env.environment "prd" }}{{ $replicas = int (max 2 $replicas) }}{{ end -}}
+            {{- $sizes := dict "small" (dict "cpu" "100m" "memory" "256Mi" "limit" "1Gi") "medium" (dict "cpu" "500m" "memory" "512Mi" "limit" "2Gi") "large" (dict "cpu" "1" "memory" "1Gi" "limit" "4Gi") -}}
+            {{- $resources := index $sizes (default "small" $spec.size) -}}
+            {{- $specHash := toJson (dict "image" $spec.image "replicas" $replicas "size" $resources "port" $port "healthPath" (default "/health" $spec.healthPath) "env" (default dict $spec.env) "database" $spec.database "buckets" $buckets "secretRefs" (default (list) $spec.secretRefs) "ingress" $ingress "network" $net "bedrock" $spec.bedrock) | sha256sum -}}
+            {{- $deploymentReady := and (eq (dig "spec" "template" "metadata" "annotations" "atlas.iag.ai/spec" "" $deployment) $specHash) (eq (dig "spec" "template" "metadata" "annotations" "atlas.iag.ai/connections" "" $deployment) $revision) (ge (int (dig "status" "observedGeneration" 0 $deployment)) (int (dig "metadata" "generation" 1 $deployment))) (eq (int (dig "status" "updatedReplicas" 0 $deployment)) $replicas) (ge (int (dig "status" "availableReplicas" 0 $deployment)) $replicas) -}}
+
+
+            {{- $roleArn := printf "arn:aws:iam::%s:role/adp-%s-%s-%s" $env.accountId $animal $component $env.environment }}
+            ---
+            apiVersion: v1
+            kind: ServiceAccount
+            metadata:
+              name: {{ $component }}
+              namespace: {{ $ns }}
+              labels: {{ $labels | toJson }}
+              annotations:
+                {{ setResourceNameAnnotation "serviceaccount" }}
+                gotemplating.fn.crossplane.io/ready: {{ ternary "True" "False" (or (not $spec.image) (not (not $revision))) | quote }}
+                eks.amazonaws.com/role-arn: {{ $roleArn | quote }}
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: {{ $component }}-envs
+              namespace: {{ $ns }}
+              labels: {{ $labels | toJson }}
+              annotations:
+                {{ setResourceNameAnnotation "envs" }}
+                gotemplating.fn.crossplane.io/ready: "True"
+            data:
+              SERVICE_NAME: {{ $component | quote }}
+              PRODUCT_UID: {{ $animal | quote }}
+              ENVIRONMENT: {{ $env.environment | quote }}
+              {{- range $peer := $allowTo }}
+              {{ upper (replace "-" "_" $peer.service) }}_HOST: {{ printf "%s.%s-%s.svc.cluster.local:%d" $peer.service $animal $peer.service (int $peer.port) | quote }}
+              {{- end }}
+              {{- range $key, $value := (default dict $spec.env) }}
+              {{ $key }}: {{ $value | quote }}
+              {{- end }}
+            {{ if and $spec.image $revision }}
+            ---
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: {{ $component }}
+              namespace: {{ $ns }}
+              labels: {{ $labels | toJson }}
+              annotations:
+                {{ setResourceNameAnnotation "deployment" }}
+                gotemplating.fn.crossplane.io/ready: {{ ternary "True" "False" $deploymentReady | quote }}
+            spec:
+              replicas: {{ $replicas }}
+              selector:
+                matchLabels:
+                  app: {{ $component }}
+              template:
+                metadata:
+                  labels: {{ $labels | toJson }}
+                  annotations:
+                    atlas.iag.ai/connections: {{ $revision | quote }}
+                    atlas.iag.ai/spec: {{ $specHash | quote }}
+                spec:
+                  serviceAccountName: {{ $component }}
+                  topologySpreadConstraints:
+                    - maxSkew: 1
+                      topologyKey: kubernetes.io/hostname
+                      {{ if eq $env.environment "prd" }}
+                      minDomains: 2
+                      {{ end }}
+                      whenUnsatisfiable: DoNotSchedule
+                      labelSelector:
+                        matchLabels: {{ $labels | toJson }}
+                    - maxSkew: 1
+                      topologyKey: topology.kubernetes.io/zone
+                      {{ if eq $env.environment "prd" }}
+                      minDomains: 2
+                      {{ end }}
+                      whenUnsatisfiable: DoNotSchedule
+                      labelSelector:
+                        matchLabels: {{ $labels | toJson }}
+                  securityContext:
+                    runAsNonRoot: true
+                    seccompProfile:
+                      type: RuntimeDefault
+                  containers:
+                    - name: {{ $component }}
+                      image: {{ $spec.image | quote }}
+                      ports:
+                        - name: http
+                          containerPort: {{ $port }}
+                      envFrom:
+                        - configMapRef:
+                            name: product-connection
+                        {{- if $spec.database }}
+                        - configMapRef:
+                            name: {{ $spec.database }}-connection
+                        {{- end }}
+                        {{- range $bucket := $buckets }}
+                        - configMapRef:
+                            name: {{ $bucket }}-connection
+                        {{- end }}
+                        - configMapRef:
+                            name: {{ $component }}-envs
+                        {{- range $secret := (default (list) $spec.secretRefs) }}
+                        - secretRef:
+                            name: {{ $secret }}
+                        {{- end }}
+                      readinessProbe:
+                        httpGet:
+                          path: {{ default "/health" $spec.healthPath | quote }}
+                          port: http
+                        periodSeconds: 10
+                      livenessProbe:
+                        httpGet:
+                          path: {{ default "/health" $spec.healthPath | quote }}
+                          port: http
+                        initialDelaySeconds: 30
+                        periodSeconds: 30
+                      resources:
+                        requests:
+                          cpu: {{ $resources.cpu | quote }}
+                          memory: {{ $resources.memory | quote }}
+                        limits:
+                          memory: {{ $resources.limit | quote }}
+                      securityContext:
+                        allowPrivilegeEscalation: false
+                        readOnlyRootFilesystem: true
+                        capabilities:
+                          drop: ["ALL"]
+            ---
+            apiVersion: v1
+            kind: Service
+            metadata:
+              name: {{ $component }}
+              namespace: {{ $ns }}
+              labels: {{ $labels | toJson }}
+              annotations:
+                {{ setResourceNameAnnotation "service" }}
+                gotemplating.fn.crossplane.io/ready: "True"
+            spec:
+              selector:
+                app: {{ $component }}
+              ports:
+                - name: http
+                  port: {{ $port }}
+                  targetPort: http
+            {{ if gt $replicas 1 }}
+            ---
+            apiVersion: policy/v1
+            kind: PodDisruptionBudget
+            metadata:
+              name: {{ $component }}
+              namespace: {{ $ns }}
+              annotations:
+                {{ setResourceNameAnnotation "disruption-budget" }}
+                gotemplating.fn.crossplane.io/ready: "True"
+            spec:
+              maxUnavailable: 1
+              selector:
+                matchLabels: {{ $labels | toJson }}
+            {{ end }}
+            {{ if $ingress.enabled }}
+            ---
+            apiVersion: networking.k8s.io/v1
+            kind: Ingress
+            metadata:
+              name: {{ $component }}
+              namespace: {{ $ns }}
+              labels: {{ $labels | toJson }}
+              annotations:
+                {{ setResourceNameAnnotation "ingress" }}
+                gotemplating.fn.crossplane.io/ready: "True"
+                alb.ingress.kubernetes.io/group.name: {{ printf "atlas-%s-internal" $env.environment | quote }}
+                alb.ingress.kubernetes.io/target-type: ip
+                alb.ingress.kubernetes.io/healthcheck-path: {{ default "/health" $spec.healthPath | quote }}
+            spec:
+              ingressClassName: alb-private
+              rules:
+                - host: {{ printf "%s.%s" $animal $dnsDomain | quote }}
+                  http:
+                    paths:
+                      - path: {{ default "/" $ingress.path | quote }}
+                        pathType: Prefix
+                        backend:
+                          service:
+                            name: {{ $component }}
+                            port:
+                              number: {{ $port }}
+            {{ end }}
+            {{ end }}
+            ---
+            apiVersion: networking.k8s.io/v1
+            kind: NetworkPolicy
+            metadata:
+              name: {{ $component }}-default-deny
+              namespace: {{ $ns }}
+              labels: {{ $labels | toJson }}
+              annotations:
+                {{ setResourceNameAnnotation "netpol-default-deny" }}
+                gotemplating.fn.crossplane.io/ready: "True"
+            spec:
+              podSelector: {}
+              policyTypes: [Ingress, Egress]
+            ---
+            apiVersion: networking.k8s.io/v1
+            kind: NetworkPolicy
+            metadata:
+              name: {{ $component }}-allow-dns
+              namespace: {{ $ns }}
+              labels: {{ $labels | toJson }}
+              annotations:
+                {{ setResourceNameAnnotation "netpol-dns" }}
+                gotemplating.fn.crossplane.io/ready: "True"
+            spec:
+              podSelector: {}
+              policyTypes: [Egress]
+              egress:
+                - to:
+                    - namespaceSelector:
+                        matchLabels:
+                          kubernetes.io/metadata.name: kube-system
+                      podSelector:
+                        matchLabels:
+                          k8s-app: kube-dns
+                  ports:
+                    - protocol: UDP
+                      port: 53
+                    - protocol: TCP
+                      port: 53
+            {{ range $direction, $peers := dict "from" $allowFrom "to" $allowTo }}
+            {{ if $peers }}
+            ---
+            apiVersion: networking.k8s.io/v1
+            kind: NetworkPolicy
+            metadata:
+              name: {{ $component }}-allow-{{ $direction }}-peers
+              namespace: {{ $ns }}
+              labels: {{ $labels | toJson }}
+              annotations:
+                {{ setResourceNameAnnotation (printf "netpol-allow-%s" $direction) }}
+                gotemplating.fn.crossplane.io/ready: "True"
+            spec:
+              podSelector: {}
+              policyTypes: [{{ ternary "Ingress" "Egress" (eq $direction "from") }}]
+              {{ ternary "ingress" "egress" (eq $direction "from") }}:
+                {{- range $peer := $peers }}
+                - {{ $direction }}:
+                    - namespaceSelector:
+                        matchLabels:
+                          kubernetes.io/metadata.name: {{ printf "%s-%s" $animal $peer.service }}
+                      podSelector:
+                        matchLabels:
+                          app: {{ $peer.service }}
+                  ports:
+                    - protocol: TCP
+                      port: {{ int (default $port $peer.port) }}
+                {{- end }}
+            {{ end }}
+            {{ end }}
+            {{ if $egressDomains }}
+            ---
+            apiVersion: networking.k8s.aws/v1alpha1
+            kind: ApplicationNetworkPolicy
+            metadata:
+              name: {{ $component }}-egress-domains
+              namespace: {{ $ns }}
+              labels: {{ $labels | toJson }}
+              annotations:
+                {{ setResourceNameAnnotation "netpol-egress-domains" }}
+                gotemplating.fn.crossplane.io/ready: "True"
+            spec:
+              podSelector: {}
+              policyTypes: [Egress]
+              egress:
+                - to:
+                    {{- range $domain := $egressDomains }}
+                    - domainName: {{ $domain | quote }}
+                    {{- end }}
+                  ports:
+                    - protocol: TCP
+                      port: 443
+            {{ end }}
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: {{ $component }}-connection
+              namespace: {{ $ns }}
+              annotations:
+                {{ setResourceNameAnnotation "connection" }}
+                gotemplating.fn.crossplane.io/ready: "True"
+            data:
+              SERVICE_NAME: {{ $component | quote }}
+              SERVICE_HOST: {{ printf "%s.%s.svc.cluster.local:%d" $component $ns $port | quote }}
+            ---
+            apiVersion: platform.atlas.iag.ai/v1alpha1
+            kind: Workload
+            status:
+              workspace: {{ printf "adp-%s-%s-%s" $animal $component $env.environment | quote }}
+              roleArn: {{ dig "workspace" "resource" "status" "atProvider" "outputs" "role_arn" "" $observed | quote }}
+              host: {{ ternary (printf "%s.%s" $animal $dnsDomain) "" (and (not (not $ingress.enabled)) (not (not $spec.image))) | quote }}
+
+    - step: ready
+      functionRef:
+        name: function-auto-ready
