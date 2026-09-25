@@ -15,7 +15,6 @@ spec:
   - title: Which product
     required:
     - product
-    - name
     properties:
       product:
         title: Product
@@ -27,14 +26,6 @@ spec:
             kind: System
           defaultKind: System
         ui:autofocus: true
-      name:
-        title: Name
-        type: string
-        description: What to call it. Most products have one database and leave this as "db"; a second one needs
-          a name of its own.
-        pattern: ^[a-z]([a-z0-9-]{0,18}[a-z0-9])?$
-        default: db
-        maxLength: 20
   - title: How big, and who uses it
     properties:
       size:
@@ -79,20 +70,20 @@ spec:
     input:
       kind: Database
       product: ${{ parameters.product }}
-      name: ${{ parameters.name }}
+      name: db
       size: ${{ parameters.size }}
       access: ${{ steps['normalize-access'].output.result }}
   - id: write-catalog-info
     name: Write the catalog entry
     action: roadiehq:utils:fs:write
     input:
-      path: products/${{ parameters.product | parseEntityRef | pick('name') }}/catalog/${{ parameters.name }}.yaml
+      path: products/${{ parameters.product | parseEntityRef | pick('name') }}/catalog/db.yaml
       content: |-
         apiVersion: backstage.io/v1alpha1
         kind: Resource
         metadata:
-          name: ${{ (parameters.product | parseEntityRef | pick('name')) + '-' + parameters.name }}
-          title: ${{ parameters.name | dump }}
+          name: ${{ (parameters.product | parseEntityRef | pick('name')) + '-db' }}
+          title: db
           description: ${{ ('PostgreSQL database for ' + (parameters.product | parseEntityRef | pick('name'))) | dump }}
           annotations:
             # A database has no pods. The product namespace is where its Database XR and the
@@ -109,9 +100,8 @@ spec:
     action: publish:github:pull-request
     input:
       repoUrl: github.com?repo=prometeo-products&owner=crossplane-poc
-      branchName: scaffolder/database-${{ parameters.product | parseEntityRef | pick('name') }}-${{ parameters.name
-        }}
-      title: 'atlas database: ${{ parameters.product | parseEntityRef | pick(''name'') }}/${{ parameters.name }}'
+      branchName: scaffolder/database-${{ parameters.product | parseEntityRef | pick('name') }}-db
+      title: 'atlas database: ${{ parameters.product | parseEntityRef | pick(''name'') }}/db'
       description: Adds a Database to ${{ parameters.product | parseEntityRef | pick('name') }} and updates the
         selected workloads.
   output:
