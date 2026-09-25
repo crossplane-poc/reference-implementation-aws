@@ -36,6 +36,7 @@ spec:
         ui:options:
           catalogFilter:
             kind: Group
+            spec.parent: iag-ai-all-users
   - title: The product's ID
     required:
     - uid

@@ -2,10 +2,11 @@ apiVersion: backstage.io/v1alpha1
 kind: Location
 metadata:
   name: atlas-idp-templates-poc
-  description: ADP software templates, copied in for sb3 testing
+  description: ADP software templates and teams, copied in for sb3 testing
 spec:
   type: url
   targets:
     - https://github.com/crossplane-poc/reference-implementation-aws/blob/main/packages/atlas-platform-poc/components/product/backstage/template.yaml
     - https://github.com/crossplane-poc/reference-implementation-aws/blob/main/packages/atlas-platform-poc/components/database/backstage/template.yaml
     - https://github.com/crossplane-poc/reference-implementation-aws/blob/main/packages/atlas-platform-poc/components/object-store/backstage/template.yaml
+    - https://github.com/crossplane-poc/reference-implementation-aws/blob/main/packages/atlas-platform-poc/teams.yaml
