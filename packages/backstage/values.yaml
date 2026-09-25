@@ -17,6 +17,11 @@ backstage:
   command: ["node", "packages/backend"]
   extraEnvVarsSecrets:
     - backstage-env-vars
+  # The CNOE backend registers the GitHub scaffolder actions only when GITHUB_TOKEN is set. The
+  # value is never used: the actions authenticate through the GitHub App integration.
+  extraEnvVars:
+    - name: GITHUB_TOKEN
+      value: unused-github-app-auth
   extraVolumeMounts:
     - name: backstage-config
       mountPath: "/app/config"
