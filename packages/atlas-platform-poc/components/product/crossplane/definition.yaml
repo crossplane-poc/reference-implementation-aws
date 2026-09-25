@@ -27,9 +27,18 @@ spec:
               displayName:
                 type: string
                 description: "What the product is called \u2014 \"Aircraft Damage Detection\". Change\
-                  \ it as often as you like; nothing in AWS is named after it."
+                  \ it as often as you like; nothing in AWS is named after it, and a frontend's domain\
+                  \ is taken from it once, when the frontend is added."
                 minLength: 1
                 maxLength: 128
+              family:
+                type: string
+                description: The product family. It places the product's external APIs under /<family>/
+                  on the API Gateway domain, and its images under <family>/ in the registry.
+                enum:
+                - ims
+                - agents
+                default: ims
               description:
                 type: string
                 description: One line, shown on the product's page in the catalog.

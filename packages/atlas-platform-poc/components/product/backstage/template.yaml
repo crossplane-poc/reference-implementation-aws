@@ -16,13 +16,26 @@ spec:
     required:
     - displayName
     - owner
+    - family
     properties:
       displayName:
         title: Product name
         type: string
-        description: What you call it. Change it whenever you like — nothing in AWS is named after it.
+        description: What you call it. Change it whenever you like — nothing in AWS is named after it. A frontend's
+          domain is taken from it once, when the frontend is added.
         maxLength: 128
         ui:autofocus: true
+      family:
+        title: Product family
+        type: string
+        description: Where its external APIs and images are filed.
+        enum:
+        - ims
+        - agents
+        enumNames:
+        - IMS
+        - Agents
+        default: ims
       description:
         title: What it does
         type: string
@@ -64,6 +77,7 @@ spec:
       name: ${{ parameters.uid }}
       displayName: ${{ parameters.displayName }}
       description: ${{ parameters.description }}
+      family: ${{ parameters.family }}
       owner: ${{ parameters.owner }}
   - id: write-catalog-info
     name: Write the catalog entry

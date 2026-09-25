@@ -12,7 +12,7 @@ backstage:
   image:
     registry: 515048895486.dkr.ecr.eu-west-1.amazonaws.com
     repository: atlas-idp/backstage
-    tag: adp-v6
+    tag: adp-v7
     pullPolicy: IfNotPresent
   command: ["node", "packages/backend"]
   extraEnvVarsSecrets:

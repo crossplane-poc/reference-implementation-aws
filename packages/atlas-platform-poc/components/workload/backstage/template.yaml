@@ -30,35 +30,18 @@ spec:
       name:
         title: What it is
         type: string
-        description: '"be", "fe", "worker". This becomes part of every name the platform derives, and it is how
-          other services refer to this one.'
-        pattern: ^[a-z]([a-z0-9-]{0,18}[a-z0-9])?$
+        description: '"Booking API", "Frontend", "Worker". Everything the platform creates for it is named after
+          its lowercase form, booking-api, and that is how other services refer to it.'
+        pattern: ^[A-Za-z][A-Za-z0-9 _-]{0,19}$
         maxLength: 20
+  - title: Its code
+    properties:
       newRepo:
         title: Create a new repository
         type: boolean
-        description: Opens a pull request in iac-github for IAGAI/<product>-<name>, built from the template for
+        description: Opens a pull request in iac-github for IAGAI/<product>-<service>, built from the template for
           the kind of code it holds. Untick to use a repository that already exists.
         default: true
-      containerPort:
-        title: Port it listens on
-        type: integer
-        description: The port used by the container and its Kubernetes Service.
-        default: 8000
-        minimum: 1
-        maximum: 65535
-      image:
-        title: Image to run
-        type: string
-        description: An existing container image. Leave blank to provision identity and networking only.
-      size:
-        title: Compute size
-        type: string
-        enum:
-        - small
-        - medium
-        - large
-        default: small
     dependencies:
       newRepo:
         oneOf:
@@ -71,6 +54,7 @@ spec:
             repoType:
               title: What it is written in
               type: string
+              description: The Python backend and Next.js templates decide the port the service listens on.
               enum:
               - Atlas-Python
               - Python
@@ -91,9 +75,53 @@ spec:
             repo:
               title: Source repository
               type: string
-              description: owner/name on GitHub. Recorded on the catalog entry so the service links back to its code
-                — releases happen by opening a pull request against this repo.
+              description: owner/name on GitHub. Recorded on the catalog entry so the service links back to its code.
               pattern: ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$
+            containerPort: &containerPort
+              title: Port it listens on
+              type: integer
+              description: The port used by the container and its Kubernetes Service.
+              default: 8000
+              minimum: 1
+              maximum: 65535
+      repoType:
+        oneOf:
+        - properties:
+            repoType:
+              enum:
+              - Atlas-Python
+              - NextJS
+        - properties:
+            repoType:
+              enum:
+              - Python
+              - Other
+            containerPort: *containerPort
+  - title: Its image
+    properties:
+      newImage:
+        title: Create a new image repository
+        type: boolean
+        description: Opens a pull request in cloudtools-aws-mgmt for an ECR repository its pipeline pushes to. The
+          service runs no pods until its first release names an image. Untick to run an image that already exists.
+        default: true
+    dependencies:
+      newImage:
+        oneOf:
+        - properties:
+            newImage:
+              enum:
+              - true
+        - required:
+          - image
+          properties:
+            newImage:
+              enum:
+              - false
+            image:
+              title: Image to run
+              type: string
+              description: An existing container image, registry/repository:tag.
   - title: What it uses
     properties:
       database:
@@ -189,41 +217,18 @@ spec:
       allowFrom:
         title: Services allowed to call this one
         type: array
-        description: They arrive on this service's own port, answered above.
+        description: They arrive on this service's own port.
         items:
-          type: object
-          required:
-          - service
-          properties:
-            service:
-              title: Service
-              type: string
-              ui:field: EntityPicker
-              ui:options:
-                catalogFilter:
-                  kind: Component
-                  spec.type: service
-                defaultKind: Component
+          type: string
+        ui:field: ProductServices
         default: []
       allowTo:
         title: Services this one may call
         type: array
-        description: No port to pick here either — each one is looked up in the catalog, which records the port
-          a service listens on.
+        description: Each one is reached on the port its catalog entry records.
         items:
-          type: object
-          required:
-          - service
-          properties:
-            service:
-              title: Service
-              type: string
-              ui:field: EntityPicker
-              ui:options:
-                catalogFilter:
-                  kind: Component
-                  spec.type: service
-                defaultKind: Component
+          type: string
+        ui:field: ProductServices
         default: []
       egressDomains:
         title: Public addresses it may reach
@@ -232,18 +237,39 @@ spec:
         items:
           type: string
         default: []
-  - title: How it is reached
+  - title: Access
+    description: Leave both unticked for a service that only other services call.
     properties:
-      ingress:
-        title: It answers requests from outside the cluster
+      frontend:
+        title: It is the product's frontend
         type: boolean
+        description: Served on https://<product name>.<env>.atlas.iag.ai behind single sign-on, which is configured
+          by a pull request in apigateway. One per product.
         default: false
-      ingressPath:
-        title: On which path
-        type: string
-        description: The hostname is the product's and is not a choice, so two services share it by taking different
-          paths.
-        default: /
+      externalApi:
+        title: It is an external API
+        type: boolean
+        description: Published through API Gateway, configured by a pull request in apigateway, at
+          https://tst.api.iag.ai/<env>/<family>/<product name> in dev and the sandboxes and
+          /<family>/<product name> from tst on (uat.api.iag.ai in uat, api.iag.ai in production).
+        default: false
+    dependencies:
+      externalApi:
+        oneOf:
+        - properties:
+            externalApi:
+              enum:
+              - false
+        - properties:
+            externalApi:
+              enum:
+              - true
+            apiPath:
+              title: Path under the product's API address
+              type: string
+              description: Leave / unless the product already has an external API; each one takes its own path.
+              pattern: ^/[A-Za-z0-9._~/-]*$
+              default: /
   steps:
   - id: fetch-product
     name: Fetch current product manifests
@@ -252,18 +278,6 @@ spec:
       url: https://github.com/crossplane-poc/prometeo-products/tree/main/products/${{ parameters.product | parseEntityRef
         | pick('name') }}
       targetPath: products/${{ parameters.product | parseEntityRef | pick('name') }}
-  - id: normalize-allowFrom
-    name: Resolve selected peers
-    action: roadiehq:utils:jsonata
-    input:
-      data: ${{ parameters.allowFrom }}
-      expression: '[$.service]'
-  - id: normalize-allowTo
-    name: Resolve selected peers
-    action: roadiehq:utils:jsonata
-    input:
-      data: ${{ parameters.allowTo }}
-      expression: '[$.service]'
   - id: write-component
     name: Create component and update dependencies
     action: atlas:component:create
@@ -271,38 +285,41 @@ spec:
       kind: Workload
       product: ${{ parameters.product }}
       name: ${{ parameters.name }}
-      containerPort: ${{ parameters.containerPort }}
-      image: ${{ parameters.image }}
+      containerPort: ${{ 3000 if (parameters.newRepo and parameters.repoType == 'NextJS') else (8000 if (parameters.newRepo
+        and parameters.repoType == 'Atlas-Python') else parameters.containerPort) }}
+      healthPath: ${{ '/' if (parameters.newRepo and parameters.repoType == 'NextJS') else '/health' }}
+      image: ${{ '' if parameters.newImage else parameters.image }}
       bedrock: ${{ parameters.bedrock }}
-      ingress: ${{ parameters.ingress }}
-      ingressPath: ${{ parameters.ingressPath }}
+      frontend: ${{ parameters.frontend }}
+      api: ${{ parameters.externalApi }}
+      apiPath: ${{ parameters.apiPath if parameters.externalApi else '' }}
       egressDomains: ${{ parameters.egressDomains }}
       database: ${{ parameters.database.component if (parameters.database and parameters.database.needed) else ''
         }}
       buckets: ${{ parameters.buckets.components if (parameters.buckets and parameters.buckets.needed) else [] }}
-      allowFrom: ${{ steps['normalize-allowFrom'].output.result }}
-      allowTo: ${{ steps['normalize-allowTo'].output.result }}
-      size: ${{ parameters.size }}
+      allowFrom: ${{ parameters.allowFrom }}
+      allowTo: ${{ parameters.allowTo }}
   - id: write-catalog-info
     name: Write the catalog entry
     action: roadiehq:utils:fs:write
     input:
-      path: products/${{ parameters.product | parseEntityRef | pick('name') }}/catalog/${{ parameters.name }}.yaml
+      path: products/${{ parameters.product | parseEntityRef | pick('name') }}/catalog/${{ steps['write-component'].output.name
+        }}.yaml
       content: |-
         apiVersion: backstage.io/v1alpha1
         kind: Component
         metadata:
-          name: ${{ (parameters.product | parseEntityRef | pick('name')) + '-' + parameters.name }}
+          name: ${{ (parameters.product | parseEntityRef | pick('name')) + '-' + steps['write-component'].output.name }}
           title: ${{ parameters.name | dump }}
           description: ${{ ('Service ' + parameters.name + ' of ' + (parameters.product | parseEntityRef | pick('name'))) | dump }}
           annotations:
-            backstage.io/kubernetes-namespace: ${{ (parameters.product | parseEntityRef | pick('name')) + '-' + parameters.name }}
-            backstage.io/kubernetes-label-selector: 'app=${{ parameters.name }}'
+            backstage.io/kubernetes-namespace: ${{ (parameters.product | parseEntityRef | pick('name')) + '-' + steps['write-component'].output.name }}
+            backstage.io/kubernetes-label-selector: 'app=${{ steps['write-component'].output.name }}'
             argocd/app-selector: atlas.iag.ai/product=${{ parameters.product | parseEntityRef | pick('name') }}
-            atlas.iag.ai/repo: ${{ (('IAGAI/' + (parameters.product | parseEntityRef | pick('name')) + '-' + parameters.name) if parameters.newRepo else parameters.repo) | dump }}
+            atlas.iag.ai/repo: ${{ (('IAGAI/' + (parameters.product | parseEntityRef | pick('name')) + '-' + steps['write-component'].output.name) if parameters.newRepo else parameters.repo) | dump }}
             # Read back by this same template when another service says it may call this one.
             # Without it that lookup falls back to 8000.
-            atlas.iag.ai/container-port: ${{ parameters.containerPort | string | dump }}
+            atlas.iag.ai/container-port: ${{ steps['write-component'].output.containerPort | string | dump }}
         spec:
           type: service
           lifecycle: experimental
@@ -322,9 +339,10 @@ spec:
     if: ${{ parameters.newRepo }}
     action: roadiehq:utils:fs:write
     input:
-      path: iac-github/config/repos/${{ parameters.product | parseEntityRef | pick('name') }}-${{ parameters.name }}.yaml
+      path: iac-github/config/repos/${{ parameters.product | parseEntityRef | pick('name') }}-${{ steps['write-component'].output.name
+        }}.yaml
       content: |-
-        name: ${{ (parameters.product | parseEntityRef | pick('name')) + '-' + parameters.name }}
+        name: ${{ (parameters.product | parseEntityRef | pick('name')) + '-' + steps['write-component'].output.name }}
         description: ${{ ('Service ' + parameters.name + ' of ' + (parameters.product | parseEntityRef | pick('name'))) | dump }}
         team_slug: ${{ steps['write-component'].output.owner | parseEntityRef | pick('name') }}
         type: ${{ parameters.repoType }}
@@ -332,8 +350,53 @@ spec:
           - team_slug: se-platform-lovelace
             permission: admin
         atlas_workflows_adp:
-          service_name: ${{ parameters.name }}
+          service_name: ${{ steps['write-component'].output.name }}
+          product_family: ${{ steps['write-component'].output.family }}
           product: ${{ parameters.product | parseEntityRef | pick('name') }}
+  - id: fetch-ecr
+    name: Fetch the registry configuration
+    if: ${{ parameters.newImage }}
+    action: fetch:plain:file
+    input:
+      url: https://github.com/crossplane-poc/cloudtools-aws-mgmt/blob/main/environments/uat/eu-west-1/ecr/ecr.auto.tfvars
+      targetPath: cloudtools/environments/uat/eu-west-1/ecr/ecr.auto.tfvars
+  - id: write-image-config
+    name: Add the image repository
+    if: ${{ parameters.newImage }}
+    action: roadiehq:utils:fs:replace
+    input:
+      files:
+      - file: cloudtools/environments/uat/eu-west-1/ecr/ecr.auto.tfvars
+        matchRegex: true
+        find: '\n}\s*$'
+        replaceWith: "\n  ${{ (parameters.product | parseEntityRef | pick('name')) + '-' + steps['write-component'].output.name
+          }} = {\n    namespace    = \"${{ steps['write-component'].output.family }}\"\n    eks_families = [\"${{ steps['write-component'].output.family
+          }}\"]\n    product_name = [\"${{ (parameters.product | parseEntityRef | pick('name')) + '-' + steps['write-component'].output.name
+          }}\"]\n    github_repo  = \"${{ ((parameters.product | parseEntityRef | pick('name')) + '-' + steps['write-component'].output.name)
+          if parameters.newRepo else parameters.repo.split('/')[1] }}\"\n    team         = \"atlas\"\n  }\n}\n"
+  - id: write-domain-config
+    name: Describe the frontend's domain
+    if: ${{ parameters.frontend }}
+    action: roadiehq:utils:fs:write
+    input:
+      path: apigateway/config/domains/${{ steps['write-component'].output.productName }}.yaml
+      content: |-
+        domain: ${{ steps['write-component'].output.productName }}
+        product: ${{ parameters.product | parseEntityRef | pick('name') }}
+        family: ${{ steps['write-component'].output.family }}
+  - id: write-api-config
+    name: Describe the external API
+    if: ${{ parameters.externalApi }}
+    action: roadiehq:utils:fs:write
+    input:
+      path: apigateway/config/apis/${{ parameters.product | parseEntityRef | pick('name') }}-${{ steps['write-component'].output.name
+        }}.yaml
+      content: |-
+        product: ${{ parameters.product | parseEntityRef | pick('name') }}
+        product_name: ${{ steps['write-component'].output.productName }}
+        family: ${{ steps['write-component'].output.family }}
+        service: ${{ steps['write-component'].output.name }}
+        path: ${{ parameters.apiPath | default('/') | dump }}
   - id: publish
     name: Open a pull request
     action: publish:github:pull-request
@@ -341,11 +404,12 @@ spec:
       repoUrl: github.com?repo=prometeo-products&owner=crossplane-poc
       sourcePath: products
       targetPath: products
-      branchName: scaffolder/workload-${{ parameters.product | parseEntityRef | pick('name') }}-${{ parameters.name
+      branchName: scaffolder/workload-${{ parameters.product | parseEntityRef | pick('name') }}-${{ steps['write-component'].output.name
         }}
-      title: 'atlas service: ${{ parameters.product | parseEntityRef | pick(''name'') }}/${{ parameters.name }}'
+      title: 'atlas service: ${{ parameters.product | parseEntityRef | pick(''name'') }}/${{ steps[''write-component''].output.name
+        }}'
       description: |-
-        Adds the `${{ parameters.name }}` service to `${{ parameters.product | parseEntityRef | pick('name') }}`.
+        Adds the `${{ steps['write-component'].output.name }}` service to `${{ parameters.product | parseEntityRef | pick('name') }}`.
 
         It also updates every component it was pointed at — each database and bucket grants it access, and each service it talks to gets the matching rule — because access is recorded at both ends. Check the whole diff.
   - id: publish-repo
@@ -355,11 +419,46 @@ spec:
     input:
       repoUrl: github.com?repo=iac-github&owner=crossplane-poc
       sourcePath: iac-github
-      branchName: scaffolder/repo-${{ parameters.product | parseEntityRef | pick('name') }}-${{ parameters.name }}
-      title: 'NOJIRA: Add repository ${{ parameters.product | parseEntityRef | pick(''name'') }}-${{ parameters.name
-        }} for ADP service ${{ parameters.product | parseEntityRef | pick(''name'') }}/${{ parameters.name }}'
+      branchName: scaffolder/repo-${{ parameters.product | parseEntityRef | pick('name') }}-${{ steps['write-component'].output.name
+        }}
+      title: 'NOJIRA: Add repository ${{ parameters.product | parseEntityRef | pick(''name'') }}-${{ steps[''write-component''].output.name
+        }} for ADP service ${{ parameters.product | parseEntityRef | pick(''name'') }}/${{ steps[''write-component''].output.name
+        }}'
       description: |-
-        Creates the repository for the `${{ parameters.name }}` service of `${{ parameters.product | parseEntityRef | pick('name') }}`, opened by the Atlas Developer Platform.
+        Creates the repository for the `${{ steps['write-component'].output.name }}` service of `${{ parameters.product | parseEntityRef | pick('name') }}`, opened by the Atlas Developer Platform.
+  - id: publish-image
+    name: Open the image repository pull request
+    if: ${{ parameters.newImage }}
+    action: publish:github:pull-request
+    input:
+      repoUrl: github.com?repo=cloudtools-aws-mgmt&owner=crossplane-poc
+      sourcePath: cloudtools
+      branchName: scaffolder/ecr-${{ parameters.product | parseEntityRef | pick('name') }}-${{ steps['write-component'].output.name
+        }}
+      title: 'NOJIRA: Add ECR repository ${{ steps[''write-component''].output.family }}/${{ parameters.product | parseEntityRef
+        | pick(''name'') }}-${{ steps[''write-component''].output.name }} for ADP'
+      description: |-
+        Creates the image repository for the `${{ steps['write-component'].output.name }}` service of `${{ parameters.product | parseEntityRef | pick('name') }}`, opened by the Atlas Developer Platform.
+  - id: publish-access
+    name: Open the access pull request
+    if: ${{ parameters.frontend or parameters.externalApi }}
+    action: publish:github:pull-request
+    input:
+      repoUrl: github.com?repo=apigateway-aws-mgmt&owner=crossplane-poc
+      sourcePath: apigateway
+      branchName: scaffolder/access-${{ parameters.product | parseEntityRef | pick('name') }}-${{ steps['write-component'].output.name
+        }}
+      title: 'NOJIRA: Publish ${{ steps[''write-component''].output.productName }} ${{ steps[''write-component''].output.name
+        }} for ADP'
+      description: |-
+        {%- if parameters.frontend %}
+        Single sign-on for the `${{ steps['write-component'].output.productName }}` frontend domain.
+        {%- endif %}
+        {%- if parameters.externalApi %}
+        API Gateway access to the `${{ steps['write-component'].output.name }}` service of `${{ parameters.product | parseEntityRef | pick('name') }}`, on `${{ parameters.apiPath | default('/') }}` under `/${{ steps['write-component'].output.family }}/${{ steps['write-component'].output.productName }}`.
+        {%- endif %}
+
+        Opened by the Atlas Developer Platform.
   output:
     links:
     - title: Open the pull request
@@ -367,7 +466,13 @@ spec:
     - title: Open the repository pull request
       if: ${{ parameters.newRepo }}
       url: ${{ steps['publish-repo'].output.remoteUrl }}
+    - title: Open the image repository pull request
+      if: ${{ parameters.newImage }}
+      url: ${{ steps['publish-image'].output.remoteUrl }}
+    - title: Open the access pull request
+      if: ${{ parameters.frontend or parameters.externalApi }}
+      url: ${{ steps['publish-access'].output.remoteUrl }}
     text:
     - title: Service address
-      content: ${{ parameters.name }}.${{ parameters.product | parseEntityRef | pick('name') }}-${{ parameters.name
-        }}.svc.cluster.local:${{ parameters.containerPort }}
+      content: ${{ steps['write-component'].output.name }}.${{ parameters.product | parseEntityRef | pick('name') }}-${{ steps['write-component'].output.name
+        }}.svc.cluster.local:${{ steps['write-component'].output.containerPort }}

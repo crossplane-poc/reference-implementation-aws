@@ -58,7 +58,7 @@ spec:
                   "buckets" (default (list) $spec.buckets)
                   "bedrock" (not (not $spec.bedrock))
                   "bedrock_inference_profiles" (default (list) $env.bedrockInferenceProfiles)
-                  "ingress_enabled" (and (not (not $ingress.enabled)) (not (not $spec.image))) }}
+                  "ingress_enabled" (and (or (not (not $ingress.frontend)) (not (not $ingress.api))) (not (not $spec.image))) }}
             ---
             apiVersion: tf.m.upbound.io/v1beta1
             kind: Workspace
@@ -116,9 +116,9 @@ spec:
             {{- $revision = default $previousRevision $revision -}}
             {{- $replicas := int (default 2 $spec.replicas) -}}
             {{- if eq $env.environment "prd" }}{{ $replicas = int (max 2 $replicas) }}{{ end -}}
-            {{- $sizes := dict "small" (dict "cpu" "100m" "memory" "256Mi" "limit" "1Gi") "medium" (dict "cpu" "500m" "memory" "512Mi" "limit" "2Gi") "large" (dict "cpu" "1" "memory" "1Gi" "limit" "4Gi") -}}
-            {{- $resources := index $sizes (default "small" $spec.size) -}}
-            {{- $specHash := toJson (dict "image" $spec.image "replicas" $replicas "size" $resources "port" $port "healthPath" (default "/health" $spec.healthPath) "env" (default dict $spec.env) "database" $spec.database "buckets" $buckets "secretRefs" (default (list) $spec.secretRefs) "ingress" $ingress "network" $net "bedrock" $spec.bedrock) | sha256sum -}}
+            {{- $exposed := or (not (not $ingress.frontend)) (not (not $ingress.api)) -}}
+            {{- $frontendHost := ternary (printf "%s.%s" (default "" $ingress.domain) $dnsDomain) "" (not (not $ingress.frontend)) -}}
+            {{- $specHash := toJson (dict "image" $spec.image "replicas" $replicas "port" $port "healthPath" (default "/health" $spec.healthPath) "env" (default dict $spec.env) "database" $spec.database "buckets" $buckets "secretRefs" (default (list) $spec.secretRefs) "ingress" $ingress "network" $net "bedrock" $spec.bedrock) | sha256sum -}}
             {{- $deploymentReady := and (eq (dig "spec" "template" "metadata" "annotations" "atlas.iag.ai/spec" "" $deployment) $specHash) (eq (dig "spec" "template" "metadata" "annotations" "atlas.iag.ai/connections" "" $deployment) $revision) (ge (int (dig "status" "observedGeneration" 0 $deployment)) (int (dig "metadata" "generation" 1 $deployment))) (eq (int (dig "status" "updatedReplicas" 0 $deployment)) $replicas) (ge (int (dig "status" "availableReplicas" 0 $deployment)) $replicas) -}}
 
 
@@ -233,12 +233,16 @@ spec:
                           port: http
                         initialDelaySeconds: 30
                         periodSeconds: 30
+                      # The eks-common service-deploy chart's defaults, until Goldilocks sizes each workload.
                       resources:
                         requests:
-                          cpu: {{ $resources.cpu | quote }}
-                          memory: {{ $resources.memory | quote }}
+                          cpu: 200m
+                          memory: 250Mi
+                          ephemeral-storage: 500Mi
                         limits:
-                          memory: {{ $resources.limit | quote }}
+                          cpu: 1000m
+                          memory: 2Gi
+                          ephemeral-storage: 2Gi
                       securityContext:
                         allowPrivilegeEscalation: false
                         readOnlyRootFilesystem: true
@@ -276,7 +280,7 @@ spec:
               selector:
                 matchLabels: {{ $labels | toJson }}
             {{ end }}
-            {{ if $ingress.enabled }}
+            {{ if $exposed }}
             ---
             apiVersion: networking.k8s.io/v1
             kind: Ingress
@@ -293,16 +297,20 @@ spec:
             spec:
               ingressClassName: alb-private
               rules:
-                - host: {{ printf "%s.%s" $animal $dnsDomain | quote }}
+                {{- range $rule := list (list $ingress.frontend $frontendHost "/") (list $ingress.api (printf "%s.%s" $animal $dnsDomain) (default "/" $ingress.path)) }}
+                {{- if index $rule 0 }}
+                - host: {{ index $rule 1 | quote }}
                   http:
                     paths:
-                      - path: {{ default "/" $ingress.path | quote }}
+                      - path: {{ index $rule 2 | quote }}
                         pathType: Prefix
                         backend:
                           service:
                             name: {{ $component }}
                             port:
                               number: {{ $port }}
+                {{- end }}
+                {{- end }}
             {{ end }}
             {{ end }}
             ---
@@ -415,7 +423,7 @@ spec:
             status:
               workspace: {{ printf "adp-%s-%s-%s" $animal $component $env.environment | quote }}
               roleArn: {{ dig "workspace" "resource" "status" "atProvider" "outputs" "role_arn" "" $observed | quote }}
-              host: {{ ternary (printf "%s.%s" $animal $dnsDomain) "" (and (not (not $ingress.enabled)) (not (not $spec.image))) | quote }}
+              host: {{ ternary $frontendHost "" (not (not $spec.image)) | quote }}
 
     - step: ready
       functionRef:
