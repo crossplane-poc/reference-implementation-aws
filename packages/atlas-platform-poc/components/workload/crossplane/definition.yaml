@@ -84,22 +84,25 @@ spec:
                   domain:
                     type: string
                     description: The frontend's host label, taken from the product's name when the workload
-                      was created. <domain>.<env>.atlas.iag.ai, or <domain>.atlas.iag.ai in prd.
+                      was created. <domain>.<env>.<family>.iag.ai, or <domain>.<family>.iag.ai in prd.
                     pattern: ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$
+                  family:
+                    type: string
+                    description: The product's family, which names the frontend's zone.
+                    enum:
+                    - ims
+                    - agents
+                    - atlas
+                    - skynet
                   api:
                     type: boolean
-                    description: An external API, published through API Gateway, which forwards to the
-                      product's UID host on path.
+                    description: The product's external API, published through API Gateway, which forwards
+                      to the product's UID host. One per product.
                     default: false
-                  path:
-                    type: string
-                    description: The API's path. Two API workloads in a product take different paths.
-                    default: /
-                    pattern: ^/
                 default: {}
                 x-kubernetes-validations:
-                - rule: '!has(self.frontend) || !self.frontend || has(self.domain)'
-                  message: A frontend needs its domain
+                - rule: '!has(self.frontend) || !self.frontend || (has(self.domain) && has(self.family))'
+                  message: A frontend needs its domain and family
               network:
                 type: object
                 description: Nothing may reach this workload and it may reach nothing, until it is listed

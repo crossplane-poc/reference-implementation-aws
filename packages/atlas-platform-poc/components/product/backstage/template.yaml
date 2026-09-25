@@ -32,9 +32,13 @@ spec:
         enum:
         - ims
         - agents
+        - atlas
+        - skynet
         enumNames:
         - IMS
         - Agents
+        - Atlas
+        - Skynet
         default: ims
       description:
         title: What it does

@@ -39,8 +39,9 @@ spec:
       newRepo:
         title: Create a new repository
         type: boolean
-        description: Opens a pull request in iac-github for IAGAI/<product>-<service>, built from the template for
-          the kind of code it holds. Untick to use a repository that already exists.
+        description: Opens a pull request in iac-github for a repository named after the product ID and this
+          service, such as IAGAI/grumpy-pangolin-booking-api, built from the template for the kind of code it
+          holds. Untick to use a repository that already exists.
         default: true
     dependencies:
       newRepo:
@@ -243,33 +244,18 @@ spec:
       frontend:
         title: It is the product's frontend
         type: boolean
-        description: Served on https://<product name>.<env>.atlas.iag.ai behind single sign-on, which is configured
-          by a pull request in apigateway. One per product.
+        description: Served behind single sign-on on the product's own domain, named after the product and its
+          family — https://t-rex.dev.ims.iag.ai in dev for a product called T-Rex, https://t-rex.ims.iag.ai in
+          production. The sign-on is configured by a pull request in apigateway. One per product.
         default: false
       externalApi:
         title: It is an external API
         type: boolean
-        description: Published through API Gateway, configured by a pull request in apigateway, at
-          https://tst.api.iag.ai/<env>/<family>/<product name> in dev and the sandboxes and
-          /<family>/<product name> from tst on (uat.api.iag.ai in uat, api.iag.ai in production).
+        description: Published through API Gateway, configured by a pull request in apigateway — for a product
+          called T-Rex in the IMS family, https://tst.api.iag.ai/dev/ims/t-rex/ in dev,
+          https://tst.api.iag.ai/ims/t-rex/ in tst, https://uat.api.iag.ai/ims/t-rex/ in uat and
+          https://api.iag.ai/ims/t-rex/ in production. One per product.
         default: false
-    dependencies:
-      externalApi:
-        oneOf:
-        - properties:
-            externalApi:
-              enum:
-              - false
-        - properties:
-            externalApi:
-              enum:
-              - true
-            apiPath:
-              title: Path under the product's API address
-              type: string
-              description: Leave / unless the product already has an external API; each one takes its own path.
-              pattern: ^/[A-Za-z0-9._~/-]*$
-              default: /
   steps:
   - id: fetch-product
     name: Fetch current product manifests
@@ -292,7 +278,6 @@ spec:
       bedrock: ${{ parameters.bedrock }}
       frontend: ${{ parameters.frontend }}
       api: ${{ parameters.externalApi }}
-      apiPath: ${{ parameters.apiPath if parameters.externalApi else '' }}
       egressDomains: ${{ parameters.egressDomains }}
       database: ${{ parameters.database.component if (parameters.database and parameters.database.needed) else ''
         }}
@@ -389,14 +374,12 @@ spec:
     if: ${{ parameters.externalApi }}
     action: roadiehq:utils:fs:write
     input:
-      path: apigateway/config/apis/${{ parameters.product | parseEntityRef | pick('name') }}-${{ steps['write-component'].output.name
-        }}.yaml
+      path: apigateway/config/apis/${{ steps['write-component'].output.productName }}.yaml
       content: |-
         product: ${{ parameters.product | parseEntityRef | pick('name') }}
         product_name: ${{ steps['write-component'].output.productName }}
         family: ${{ steps['write-component'].output.family }}
         service: ${{ steps['write-component'].output.name }}
-        path: ${{ parameters.apiPath | default('/') | dump }}
   - id: publish
     name: Open a pull request
     action: publish:github:pull-request
@@ -455,7 +438,7 @@ spec:
         Single sign-on for the `${{ steps['write-component'].output.productName }}` frontend domain.
         {%- endif %}
         {%- if parameters.externalApi %}
-        API Gateway access to the `${{ steps['write-component'].output.name }}` service of `${{ parameters.product | parseEntityRef | pick('name') }}`, on `${{ parameters.apiPath | default('/') }}` under `/${{ steps['write-component'].output.family }}/${{ steps['write-component'].output.productName }}`.
+        API Gateway access to the `${{ steps['write-component'].output.name }}` service of `${{ parameters.product | parseEntityRef | pick('name') }}`, under `/${{ steps['write-component'].output.family }}/${{ steps['write-component'].output.productName }}/`.
         {%- endif %}
 
         Opened by the Atlas Developer Platform.

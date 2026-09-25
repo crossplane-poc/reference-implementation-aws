@@ -117,7 +117,9 @@ spec:
             {{- $replicas := int (default 2 $spec.replicas) -}}
             {{- if eq $env.environment "prd" }}{{ $replicas = int (max 2 $replicas) }}{{ end -}}
             {{- $exposed := or (not (not $ingress.frontend)) (not (not $ingress.api)) -}}
-            {{- $frontendHost := ternary (printf "%s.%s" (default "" $ingress.domain) $dnsDomain) "" (not (not $ingress.frontend)) -}}
+            {{- $frontendZone := printf "%s.iag.ai" (default "ims" $ingress.family) -}}
+            {{- if ne $env.environment "prd" }}{{ $frontendZone = printf "%s.%s" $env.environment $frontendZone }}{{ end -}}
+            {{- $frontendHost := ternary (printf "%s.%s" (default "" $ingress.domain) $frontendZone) "" (not (not $ingress.frontend)) -}}
             {{- $specHash := toJson (dict "image" $spec.image "replicas" $replicas "port" $port "healthPath" (default "/health" $spec.healthPath) "env" (default dict $spec.env) "database" $spec.database "buckets" $buckets "secretRefs" (default (list) $spec.secretRefs) "ingress" $ingress "network" $net "bedrock" $spec.bedrock) | sha256sum -}}
             {{- $deploymentReady := and (eq (dig "spec" "template" "metadata" "annotations" "atlas.iag.ai/spec" "" $deployment) $specHash) (eq (dig "spec" "template" "metadata" "annotations" "atlas.iag.ai/connections" "" $deployment) $revision) (ge (int (dig "status" "observedGeneration" 0 $deployment)) (int (dig "metadata" "generation" 1 $deployment))) (eq (int (dig "status" "updatedReplicas" 0 $deployment)) $replicas) (ge (int (dig "status" "availableReplicas" 0 $deployment)) $replicas) -}}
 
@@ -297,7 +299,7 @@ spec:
             spec:
               ingressClassName: alb-private
               rules:
-                {{- range $rule := list (list $ingress.frontend $frontendHost "/") (list $ingress.api (printf "%s.%s" $animal $dnsDomain) (default "/" $ingress.path)) }}
+                {{- range $rule := list (list $ingress.frontend $frontendHost "/") (list $ingress.api (printf "%s.%s" $animal $dnsDomain) "/") }}
                 {{- if index $rule 0 }}
                 - host: {{ index $rule 1 | quote }}
                   http:

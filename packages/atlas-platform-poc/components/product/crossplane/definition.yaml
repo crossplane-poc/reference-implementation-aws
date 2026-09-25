@@ -38,6 +38,8 @@ spec:
                 enum:
                 - ims
                 - agents
+                - atlas
+                - skynet
                 default: ims
               description:
                 type: string
