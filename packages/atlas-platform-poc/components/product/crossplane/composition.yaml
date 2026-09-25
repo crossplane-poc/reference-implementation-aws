@@ -40,7 +40,7 @@ spec:
             {{- $ns := $xr.metadata.namespace -}}
             {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
 
-            {{- $workspace := printf "atlas-%s-product-%s" $animal $env.environment -}}
+            {{- $workspace := printf "adp-%s-product-%s" $animal $env.environment -}}
 
             {{- $vars := dict
                   "animal" $animal
@@ -84,7 +84,7 @@ spec:
             {{- $ns := $xr.metadata.namespace -}}
             {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
 
-            {{- $workspace := printf "atlas-%s-product-%s" $animal $env.environment -}}
+            {{- $workspace := printf "adp-%s-product-%s" $animal $env.environment -}}
             {{- $observed := default dict .observed.resources -}}
             {{- $out := dig "status" "atProvider" "outputs" dict (dig "workspace" "resource" dict $observed) -}}
 

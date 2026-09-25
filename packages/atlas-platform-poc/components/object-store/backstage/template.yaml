@@ -116,7 +116,7 @@ spec:
       description: |-
         Adds an `ObjectStore` to `${{ parameters.product | parseEntityRef | pick('name') }}`.
 
-        Syncing it creates the bucket `atlas-${{ parameters.product | parseEntityRef | pick('name') }}-${{ parameters.name }}-<environment>` with its own KMS key.
+        Syncing it creates the bucket `adp-${{ parameters.product | parseEntityRef | pick('name') }}-${{ parameters.name }}-<environment>` with its own KMS key.
   output:
     links:
     - title: Open the pull request

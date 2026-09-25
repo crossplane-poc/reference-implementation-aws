@@ -98,7 +98,7 @@ spec:
       description: |-
         Adds `products/${{ parameters.uid }}/` — the namespace, the Product component and the catalog entry.
 
-        The product's ID is **${{ parameters.uid }}**. Every AWS resource it owns will be named `atlas-${{ parameters.uid }}-<component>-<environment>`, so the product can be renamed later without anything being recreated.
+        The product's ID is **${{ parameters.uid }}**. Every AWS resource it owns will be named `adp-${{ parameters.uid }}-<component>-<environment>`, so the product can be renamed later without anything being recreated.
   output:
     links:
     - title: Open the pull request

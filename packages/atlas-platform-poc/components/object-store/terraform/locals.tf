@@ -1,9 +1,9 @@
 locals {
-  name = "atlas-${var.animal}-${var.component}-${var.environment}"
+  name = "adp-${var.animal}-${var.component}-${var.environment}"
 
   grants = { for a in var.access : a.service => {
     level = a.level
-    role  = "atlas-${var.animal}-${a.service}-${var.environment}"
+    role  = "adp-${var.animal}-${a.service}-${var.environment}"
   } }
 
   object_actions = {

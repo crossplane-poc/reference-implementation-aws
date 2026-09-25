@@ -1,7 +1,7 @@
-# Naming: atlas-<animal>-<component>-<environment>. No region in the identifier — environment
+# Naming: adp-<animal>-<component>-<environment>. No region in the identifier — environment
 # is the discriminator, region is a property of the account.
 locals {
-  name = "atlas-${var.animal}-${var.component}-${var.environment}"
+  name = "adp-${var.animal}-${var.component}-${var.environment}"
 
   # Postgres identifiers reject hyphens, and a UID is <adjective>-<animal>.
   database_name = "${replace(var.animal, "-", "")}db"
@@ -42,7 +42,7 @@ locals {
     "ManagedBy"            = "crossplane"
   }
 
-  auth_roles  = [for s in var.access : "atlas-${var.animal}-${s}-${var.environment}"]
+  auth_roles  = [for s in var.access : "adp-${var.animal}-${s}-${var.environment}"]
   admin_roles = var.admin_access
 
   db_user_arn_prefix = "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.aurora.cluster_resource_id}"

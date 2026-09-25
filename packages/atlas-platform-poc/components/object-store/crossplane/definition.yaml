@@ -28,7 +28,7 @@ spec:
                 minimum: 1
               access:
                 type: array
-                description: Services allowed to use the bucket. A service's IAM role is named atlas-<animal>-<service>-<environment>,
+                description: Services allowed to use the bucket. A service's IAM role is named adp-<animal>-<service>-<environment>,
                   so this is a service name, not a reference to anything.
                 items:
                   type: object
