@@ -54,12 +54,6 @@ spec:
             service:
               title: Service
               type: string
-              ui:field: EntityPicker
-              ui:options:
-                catalogFilter:
-                  kind: Component
-                  spec.type: service
-                defaultKind: Component
             level:
               title: Access
               type: string
@@ -70,6 +64,9 @@ spec:
               - Read only
               - Read and write
               default: rw
+        ui:field: ProductServices
+        ui:options:
+          level: true
         default: []
         description: Existing services granted access. Their bucket references are updated in the same PR.
   steps:

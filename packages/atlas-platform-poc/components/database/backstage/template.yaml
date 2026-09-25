@@ -55,12 +55,7 @@ spec:
         type: array
         items:
           type: string
-          ui:field: EntityPicker
-          ui:options:
-            catalogFilter:
-              kind: Component
-              spec.type: service
-            defaultKind: Component
+        ui:field: ProductServices
         default: []
         description: Existing services granted application-user access. Their database references are updated in
           the same PR.
