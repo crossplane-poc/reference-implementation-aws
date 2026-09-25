@@ -16,9 +16,8 @@ locals {
     large  = { min = 2, max = 16, instances = 2 }
   }[var.size]
 
-  database_azs             = sort(distinct([for subnet in data.aws_subnet.database : subnet.availability_zone]))
-  instance_count           = var.environment == "prd" ? max(2, local.capacity.instances) : local.capacity.instances
-  permissions_boundary_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/atlas-component-boundary"
+  database_azs   = sort(distinct([for subnet in data.aws_subnet.database : subnet.availability_zone]))
+  instance_count = var.environment == "prd" ? max(2, local.capacity.instances) : local.capacity.instances
 
   is_production          = var.environment == "prd"
   backup_retention_days  = local.is_production ? 30 : 7

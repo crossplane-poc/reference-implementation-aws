@@ -49,7 +49,6 @@ module "aurora" {
   enabled_cloudwatch_logs_exports = local.cloudwatch_log_exports
   create_cloudwatch_log_group     = true
   create_monitoring_role          = true
-  iam_role_permissions_boundary   = local.permissions_boundary_arn
 
   # use_name_prefix defaults to true, which would append a random suffix.
   cluster_parameter_group = {

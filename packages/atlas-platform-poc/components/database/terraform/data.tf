@@ -17,7 +17,7 @@ data "aws_caller_identity" "current" {}
 data "aws_eks_clusters" "available" {}
 
 data "aws_eks_cluster" "main" {
-  name = data.aws_eks_clusters.available.names[0]
+  name = one(data.aws_eks_clusters.available.names)
 }
 
 data "aws_vpc" "main" {

@@ -73,7 +73,6 @@ module "bootstrap" {
   }
 
   cloudwatch_logs_retention_in_days = 14
-  role_permissions_boundary         = local.permissions_boundary_arn
   role_name                         = "${local.name}-bootstrap"
 
   tags = local.tags
