@@ -1,0 +1,22 @@
+# ADP products on the dev cluster. ArgoCD applies only Namespaces and the ADP composite resources;
+# everything they compose is created by Crossplane under its own credentials.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: atlas-dev
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: ADP products deployed to dev by the atlas-products ApplicationSet.
+  sourceRepos:
+    - 'https://github.com/crossplane-poc/prometeo-products.git'
+  destinations:
+    - name: ims-eu-west-1
+      namespace: '*'
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+  namespaceResourceWhitelist:
+    - group: platform.atlas.iag.ai
+      kind: '*'

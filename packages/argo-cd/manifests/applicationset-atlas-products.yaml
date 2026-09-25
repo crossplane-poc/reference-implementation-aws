@@ -1,0 +1,55 @@
+# One Application per ADP product, deployed to the cluster labelled as dev. Merging to main is the
+# deploy. The Application label matches the argocd/app-selector on the product's catalog entity.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: atlas-products
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  # Applications own databases and buckets: never delete one as a side effect of the generator.
+  syncPolicy:
+    applicationsSync: create-update
+    preserveResourcesOnDeletion: true
+  generators:
+    - matrix:
+        generators:
+          - git:
+              repoURL: https://github.com/crossplane-poc/prometeo-products.git
+              revision: main
+              directories:
+                - path: products/*
+          - clusters:
+              selector:
+                matchLabels:
+                  prometeo.iag.ai/rung: dev
+  template:
+    metadata:
+      name: 'atlas-{{ .path.basename }}-dev'
+      labels:
+        atlas.iag.ai/product: '{{ .path.basename }}'
+    spec:
+      project: atlas-dev
+      source:
+        repoURL: https://github.com/crossplane-poc/prometeo-products.git
+        targetRevision: main
+        path: '{{ .path.path }}'
+        directory:
+          recurse: true
+          # Backstage entities, not cluster resources.
+          exclude: '{catalog-info.yaml,catalog/*}'
+      destination:
+        name: '{{ .name }}'
+      syncPolicy:
+        automated:
+          selfHeal: true
+          prune: true
+        syncOptions:
+          - ServerSideApply=true
+        retry:
+          limit: -1
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 10m
