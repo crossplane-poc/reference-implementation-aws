@@ -108,8 +108,8 @@ Terraform-owned `*-base-*` pair already shows the shape of the fix.
 ### Registry
 
 One central ECR, account `525426937140` (the cloudtools uat account), repositories named
-`<product-family>/<service>` and catalogued in
-`cloudtools-aws-mgmt/environments/uat/eu-west-1/base-infra/ecr.auto.tfvars`.
+`<product-family>/<service>` and catalogued one file per repository in
+`cloudtools-aws-mgmt/environments/uat/eu-west-1/ecr/repositories/`.
 
 Tag mutability is `IMMUTABLE_WITH_EXCLUSION` with `sb1*`, `dev*`, `tst*`, `uat*`, `prd*` excluded —
 moving environment-named tags are deliberately permitted. Worth remembering when we discuss what a
