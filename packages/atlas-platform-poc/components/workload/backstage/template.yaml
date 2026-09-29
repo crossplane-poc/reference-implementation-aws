@@ -338,27 +338,21 @@ spec:
           service_name: ${{ steps['write-component'].output.name }}
           product_family: ${{ steps['write-component'].output.family }}
           product: ${{ parameters.product | parseEntityRef | pick('name') }}
-  - id: fetch-ecr
-    name: Fetch the registry configuration
-    if: ${{ parameters.newImage }}
-    action: fetch:plain:file
-    input:
-      url: https://github.com/crossplane-poc/cloudtools-aws-mgmt/blob/main/environments/uat/eu-west-1/ecr/ecr.auto.tfvars
-      targetPath: cloudtools/environments/uat/eu-west-1/ecr/ecr.auto.tfvars
   - id: write-image-config
-    name: Add the image repository
+    name: Describe the image repository
     if: ${{ parameters.newImage }}
-    action: roadiehq:utils:fs:replace
+    action: roadiehq:utils:fs:write
     input:
-      files:
-      - file: cloudtools/environments/uat/eu-west-1/ecr/ecr.auto.tfvars
-        matchRegex: true
-        find: '\n}\s*$'
-        replaceWith: "\n  ${{ (parameters.product | parseEntityRef | pick('name')) + '-' + steps['write-component'].output.name
-          }} = {\n    namespace    = \"${{ steps['write-component'].output.family }}\"\n    eks_families = [\"${{ steps['write-component'].output.family
-          }}\"]\n    product_name = [\"${{ (parameters.product | parseEntityRef | pick('name')) + '-' + steps['write-component'].output.name
-          }}\"]\n    github_repo  = \"${{ ((parameters.product | parseEntityRef | pick('name')) + '-' + steps['write-component'].output.name)
-          if parameters.newRepo else parameters.repo.split('/')[1] }}\"\n    team         = \"atlas\"\n  }\n}\n"
+      path: cloudtools/environments/uat/eu-west-1/ecr/repositories/${{ parameters.product | parseEntityRef | pick('name') }}-${{
+        steps['write-component'].output.name }}.yaml
+      content: |-
+        namespace: ${{ steps['write-component'].output.family }}
+        eks_families:
+          - ${{ steps['write-component'].output.family }}
+        product_name:
+          - ${{ (parameters.product | parseEntityRef | pick('name')) + '-' + steps['write-component'].output.name }}
+        github_repo: ${{ ((parameters.product | parseEntityRef | pick('name')) + '-' + steps['write-component'].output.name) if parameters.newRepo else parameters.repo.split('/')[1] }}
+        team: atlas
   - id: write-domain-config
     name: Describe the frontend's domain
     if: ${{ parameters.frontend }}
