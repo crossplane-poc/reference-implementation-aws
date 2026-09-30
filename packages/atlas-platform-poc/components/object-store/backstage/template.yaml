@@ -30,9 +30,10 @@ spec:
       name:
         title: What it is for
         type: string
-        description: '"data", "statics", "uploads". This becomes part of the bucket name — you do not choose the
-          bucket name itself, the platform derives it so it stays stable if the product is renamed.'
-        pattern: ^[a-z]([a-z0-9-]{0,18}[a-z0-9])?$
+        description: '"Data", "Statics", "User uploads". Its lowercase form, user-uploads, becomes part of the
+          bucket name — you do not choose the bucket name itself, the platform derives it so it stays stable if
+          the product is renamed.'
+        pattern: ^[A-Za-z][A-Za-z0-9 _-]{0,19}$
         maxLength: 20
   - title: Retention and access
     properties:
@@ -90,12 +91,12 @@ spec:
     name: Write the catalog entry
     action: roadiehq:utils:fs:write
     input:
-      path: products/${{ parameters.product | parseEntityRef | pick('name') }}/catalog/${{ parameters.name }}.yaml
+      path: products/${{ parameters.product | parseEntityRef | pick('name') }}/catalog/${{ steps['write-component'].output.name }}.yaml
       content: |-
         apiVersion: backstage.io/v1alpha1
         kind: Resource
         metadata:
-          name: ${{ (parameters.product | parseEntityRef | pick('name')) + '-' + parameters.name }}
+          name: ${{ (parameters.product | parseEntityRef | pick('name')) + '-' + steps['write-component'].output.name }}
           title: ${{ parameters.name | dump }}
           description: ${{ ('S3 bucket for ' + (parameters.product | parseEntityRef | pick('name'))) | dump }}
           annotations:
@@ -111,12 +112,12 @@ spec:
     action: publish:github:pull-request
     input:
       repoUrl: github.com?repo=prometeo-products&owner=crossplane-poc
-      branchName: scaffolder/s3-${{ parameters.product | parseEntityRef | pick('name') }}-${{ parameters.name }}
-      title: 'atlas bucket: ${{ parameters.product | parseEntityRef | pick(''name'') }}/${{ parameters.name }}'
+      branchName: scaffolder/s3-${{ parameters.product | parseEntityRef | pick('name') }}-${{ steps['write-component'].output.name }}
+      title: 'atlas bucket: ${{ parameters.product | parseEntityRef | pick(''name'') }}/${{ steps[''write-component''].output.name }}'
       description: |-
         Adds an `ObjectStore` to `${{ parameters.product | parseEntityRef | pick('name') }}`.
 
-        Syncing it creates the bucket `adp-${{ parameters.product | parseEntityRef | pick('name') }}-${{ parameters.name }}-<environment>` with its own KMS key.
+        Syncing it creates the bucket `adp-${{ parameters.product | parseEntityRef | pick('name') }}-${{ steps['write-component'].output.name }}-<environment>` with its own KMS key.
   output:
     links:
     - title: Open the pull request
