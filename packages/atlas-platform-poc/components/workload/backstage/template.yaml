@@ -149,12 +149,9 @@ spec:
                 component:
                   title: Which one
                   type: string
-                  ui:field: EntityPicker
+                  ui:field: ProductResource
                   ui:options:
-                    catalogFilter:
-                      kind: Resource
-                      spec.type: database
-                    defaultKind: Resource
+                    type: database
       buckets:
         title: Buckets
         type: object
@@ -188,12 +185,9 @@ spec:
                       bucket:
                         title: Bucket
                         type: string
-                        ui:field: EntityPicker
+                        ui:field: ProductResource
                         ui:options:
-                          catalogFilter:
-                            kind: Resource
-                            spec.type: object-store
-                          defaultKind: Resource
+                          type: object-store
                       level:
                         title: Access
                         type: string
