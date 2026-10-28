@@ -7,7 +7,7 @@ variable "animal" {
 }
 
 variable "component" {
-  description = "What this workload is — \"be\", \"fe\", \"worker\". The XR's own name."
+  description = "What this app service is — \"be\", \"fe\", \"worker\". The XR's own name."
   type        = string
 }
 
@@ -31,25 +31,25 @@ variable "container_port" {
 }
 
 variable "database" {
-  description = "Name of the Database this workload uses, or empty. Opens egress to the database subnets and pulls in its connection details."
+  description = "Name of the Database this app service uses, or empty. Opens egress to the database subnets and pulls in its connection details."
   type        = string
   default     = ""
 }
 
 variable "ingress_enabled" {
-  description = "Whether a load balancer fronts this workload, which opens ingress from the private subnets."
+  description = "Whether a load balancer fronts this app service, which opens ingress from the private subnets."
   type        = bool
   default     = false
 }
 
 variable "buckets" {
-  description = "Names of the ObjectStores this workload uses. Opens egress to the S3 VPC endpoint and pulls in their connection details."
+  description = "Names of the ObjectStores this app service uses. Opens egress to the S3 VPC endpoint and pulls in their connection details."
   type        = list(string)
   default     = []
 }
 
 variable "bedrock" {
-  description = "Whether this workload calls Bedrock, which grants model invocation and opens egress to the bedrock-runtime VPC endpoint."
+  description = "Whether this app service calls Bedrock, which grants model invocation and opens egress to the bedrock-runtime VPC endpoint."
   type        = bool
   default     = false
 }

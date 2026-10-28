@@ -1,7 +1,7 @@
 locals {
   name = "adp-${var.animal}-${var.component}-${var.environment}"
 
-  # A workload has a namespace to itself; the product's own namespace is where the things with
+  # An app service has a namespace to itself; the product's own namespace is where the things with
   # no pods live, and where the ConfigMaps this one consumes are published.
   namespace = "${var.animal}-${var.component}"
 

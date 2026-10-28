@@ -103,7 +103,7 @@ spec:
       branchName: scaffolder/database-${{ parameters.product | parseEntityRef | pick('name') }}-db
       title: 'atlas database: ${{ parameters.product | parseEntityRef | pick(''name'') }}/db'
       description: Adds a Database to ${{ parameters.product | parseEntityRef | pick('name') }} and updates the
-        selected workloads.
+        selected app services.
   output:
     links:
     - title: Open the pull request

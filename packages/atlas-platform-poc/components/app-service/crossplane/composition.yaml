@@ -2,20 +2,20 @@
 # an AWS address, and the connection ConfigMaps pulled in from the product), then the Kubernetes
 # side rendered natively.
 #
-# A workload has a namespace to itself, named <product>-<workload>. The product's own namespace
+# An app service has a namespace to itself, named <product>-<component>. The product's own namespace
 # holds what has no pods — the Product, the Databases, the ObjectStores and the ConfigMaps they
 # publish — and a namespaced XR composes only into its own namespace, which is why those
 # ConfigMaps reach the pods through the module rather than through this file.
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
-  name: workload.platform.atlas.iag.ai
+  name: appservice.platform.atlas.iag.ai
   labels:
-    crossplane.io/xrd: workloads.platform.atlas.iag.ai
+    crossplane.io/xrd: appservices.platform.atlas.iag.ai
 spec:
   compositeTypeRef:
     apiVersion: platform.atlas.iag.ai/v1alpha1
-    kind: Workload
+    kind: AppService
   mode: Pipeline
   pipeline:
     - step: environment
@@ -76,11 +76,11 @@ spec:
                 name: {{ $component }}-outputs
               forProvider:
                 source: Remote
-                module: "git::https://github.com/crossplane-poc/reference-implementation-aws.git//packages/atlas-platform-poc/components/workload/terraform?ref=main&depth=1"
+                module: "git::https://github.com/crossplane-poc/reference-implementation-aws.git//packages/atlas-platform-poc/components/app-service/terraform?ref=main&depth=1"
                 enableTerraformCLILogging: true
                 varmap: {{ $vars | toJson }}
 
-    - step: workload
+    - step: app-service
       functionRef:
         name: function-go-templating
       input:
@@ -235,7 +235,7 @@ spec:
                           port: http
                         initialDelaySeconds: 30
                         periodSeconds: 30
-                      # The eks-common service-deploy chart's defaults, until Goldilocks sizes each workload.
+                      # The eks-common service-deploy chart's defaults, until Goldilocks sizes each app service.
                       resources:
                         requests:
                           cpu: 200m
@@ -421,7 +421,7 @@ spec:
               SERVICE_HOST: {{ printf "%s.%s.svc.cluster.local:%d" $component $ns $port | quote }}
             ---
             apiVersion: platform.atlas.iag.ai/v1alpha1
-            kind: Workload
+            kind: AppService
             status:
               workspace: {{ printf "adp-%s-%s-%s" $animal $component $env.environment | quote }}
               roleArn: {{ dig "workspace" "resource" "status" "atProvider" "outputs" "role_arn" "" $observed | quote }}
