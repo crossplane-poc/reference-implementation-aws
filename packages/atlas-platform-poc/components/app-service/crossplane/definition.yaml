@@ -1,13 +1,13 @@
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
-  name: workloads.platform.atlas.iag.ai
+  name: appservices.platform.atlas.iag.ai
 spec:
   scope: Namespaced
   group: platform.atlas.iag.ai
   names:
-    kind: Workload
-    plural: workloads
+    kind: AppService
+    plural: appservices
     shortNames:
     - wl
   versions:
@@ -69,12 +69,12 @@ spec:
                 x-kubernetes-list-type: set
               bedrock:
                 type: boolean
-                description: Whether this workload calls Bedrock. It may then invoke the approved models
+                description: Whether this app service calls Bedrock. It may then invoke the approved models
                   through an EU inference profile, and reach the Bedrock endpoint.
                 default: false
               ingress:
                 type: object
-                description: How this workload is reached from outside the cluster. Neither set, it is not.
+                description: How this app service is reached from outside the cluster. Neither set, it is not.
                 properties:
                   frontend:
                     type: boolean
@@ -83,7 +83,7 @@ spec:
                     default: false
                   domain:
                     type: string
-                    description: The frontend's host label, taken from the product's name when the workload
+                    description: The frontend's host label, taken from the product's name when the app service
                       was created. <domain>.<env>.<family>.iag.ai, or <domain>.<family>.iag.ai in prd.
                     pattern: ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$
                   family:
@@ -105,7 +105,7 @@ spec:
                   message: A frontend needs its domain and family
               network:
                 type: object
-                description: Nothing may reach this workload and it may reach nothing, until it is listed
+                description: Nothing may reach this app service and it may reach nothing, until it is listed
                   here. Both ends of a connection have to allow it, so each entry has a counterpart in
                   the peer's own manifest.
                 properties:
@@ -120,7 +120,7 @@ spec:
                         service: *id001
                         port:
                           type: integer
-                          description: "Defaults to this workload's containerPort \u2014 a caller arrives\
+                          description: "Defaults to this app service's containerPort \u2014 a caller arrives\
                             \ on the port this service listens on."
                           minimum: 1
                           maximum: 65535
@@ -150,7 +150,7 @@ spec:
                     - service
                   egressDomains:
                     type: array
-                    description: Public hostnames this workload may reach, over HTTPS.
+                    description: Public hostnames this app service may reach, over HTTPS.
                     items:
                       type: string
                     default: []

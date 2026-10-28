@@ -1,5 +1,5 @@
 # One Workspace (the bucket + its IAM policies), then a ConfigMap publishing
-# S3_BUCKET / S3_BUCKET_ARN into the product's namespace, where its workloads read it.
+# S3_BUCKET / S3_BUCKET_ARN into the product's namespace, where its app services read it.
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:

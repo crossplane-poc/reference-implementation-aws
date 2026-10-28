@@ -1,7 +1,7 @@
 apiVersion: scaffolder.backstage.io/v1beta3
 kind: Template
 metadata:
-  name: workload
+  name: app-service
   title: Add a service
   description: Somewhere for a product's code to run — an identity and the network rules that let it reach what
     it needs. Create the product first.
@@ -262,7 +262,7 @@ spec:
     name: Create component and update dependencies
     action: atlas:component:create
     input:
-      kind: Workload
+      kind: AppService
       product: ${{ parameters.product }}
       name: ${{ parameters.name }}
       containerPort: ${{ 3000 if (parameters.newRepo and parameters.repoType == 'NextJS') else (8000 if (parameters.newRepo
@@ -375,7 +375,7 @@ spec:
       repoUrl: github.com?repo=prometeo-products&owner=crossplane-poc
       sourcePath: products
       targetPath: products
-      branchName: scaffolder/workload-${{ parameters.product | parseEntityRef | pick('name') }}-${{ steps['write-component'].output.name
+      branchName: scaffolder/app-service-${{ parameters.product | parseEntityRef | pick('name') }}-${{ steps['write-component'].output.name
         }}
       title: 'atlas service: ${{ parameters.product | parseEntityRef | pick(''name'') }}/${{ steps[''write-component''].output.name
         }}'

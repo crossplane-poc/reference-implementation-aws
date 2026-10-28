@@ -1,5 +1,5 @@
 ################################################################################
-# The workload's own identity (IRSA)
+# The app service's own identity (IRSA)
 #
 # Created empty. Every permission this role ends up with is attached by whatever granted it:
 # a Database's IAM-auth policy, an ObjectStore's read or write policy. That is why the name is
